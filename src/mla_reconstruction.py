@@ -364,7 +364,6 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
     
     
     """
-    
     # retrieve data blocks
     data_block_list = _get_data_block_list(block_list)
     
@@ -386,21 +385,68 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
 def _delete_last_fft_tone(dset):
     """returns the dset with the last column deleted.
     
-    This function is used to remove the fft coefficient of the compensation channel from the mla data set
-    
+    This function is used to remove the fft coefficient of the compensation 
+    channel from the mla data set
     """
     return np.delete(dset, -1, axis=1)
 
 
 def _convert_to_polar_coordinates(dset):
-    """converts the complex values in the given 2d-array into polar coordinate representation
+    """converts the complex values in the given 2d-array into polar coordinate 
+    representation
     
-    the return array has 3 axes where the third axis is of size two such that dset_p[:,:,0] gives the radial contribution and
-    dset_p[:,:,1] returns the angular contribution of the polar coordinate tuple.
+    This function ads an third axis to the given dset array to store the 
+    computed radial coordinate values as dset[:,:,0] and the angular coordinate
+    values as dset[:,:,1].
+    
+    Parameter
+    ---------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).
+            
+    Returns
+    -------
+        dset_p | 3d np.array
+            FFT coefficient matrix in polar coordinates. The third
+            axes has length two where 0 is the radial part and 1 stands for 
+            the angular part (``dset_p[:,:,0]`` returns a 2d array of all 
+            radial coordinate values.)
+            
+    Example
+    -------
+        load data
+        
+        >>> lines = _load_mla_data('mla_data.txt')
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list[0])
+        >>> dset = _parse_all_data_blocks(block_list, prm['demodnum'])
+        
+        convert complex-valued ``dset`` to polar coordinates
+        
+        >>> dset_p = _convert_to_polar_coordiates(dset)
+        >>> len(dset_p.shape)
+        ... 3
+        
+    Raises
+    ------
+        MLAReconstructionException
+            if the given ``dset`` np.array is not 2-dimensional.
+            
     
     """
+    
+    # verify that shape matches
+    if len(dset.shape) != 2:
+        err_msg = """dset must be a 2d np.array. 
+            Given dset has shape: {:d}
+        """.format(len(dset.shape))
+        raise MLAReconstructionException(err_msg)
+    
+    # allocate memory
     dset_p = np.empty((*dset.shape,2), dtype=np.float)
 
+    # convert radial and angular coordinates 
     for idx in range(dset.shape[0]):
         for idy in range(dset.shape[1]):
             dset_p[idx, idy,:] = cmath.polar(dset[idx, idy])
@@ -408,7 +454,43 @@ def _convert_to_polar_coordinates(dset):
     
     
 def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, amplitude_lag=None):
-    """ """
+    """applies amplitude and phase correction to the given FFT coefficent matrix
+    
+    This function applies the predefined ``amplitude_lag`` and ``phase_lag``
+    values as correction onto the provided FFT coefficient matrix.
+    It is important that the given ``dset_p`` is provided in polar coordinates.
+    If no values for ``deviation``, ``phase_lag``, and ``amplitude_lag`` are 
+    provided default parameter will be used (i.e. ``DEVIATIOM``, ``PHASE_LAG``, 
+    and ``AMPLITUDE_LAG``).
+    
+    
+    Parameter
+    ---------
+        dset_p | 3d np.array
+            FFT coefficient matrix in polar coordinates. The third
+            axes has length two where 0 is the radial part and 1 stands for 
+            the angular part (``dset_p[:,:,0]`` returns a 2d array of all 
+            radial coordinate values).
+        deviation | float
+            constant offset applied to the phase lag values
+        phase_lag | 1d np.array
+            phase lags values for every higher harmonic. Length has to match 
+            the FFT-coefficient length in ``dset_p``.
+        amplitude_lag | 1d np.array
+            ampltiude lag values for every higher harmonic. Length has to match
+            the FFT-coefficient length in ``dset_p``.
+            
+    
+    Returns
+    -------
+        3d np.array
+            phase- and amplitude-corrected FFT coefficient matrix in polar
+            coordinates.
+    
+    
+    
+    """
+    
     # create copy of data structure
     dset_p_ = dset_p.copy()
     
@@ -422,7 +504,6 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, 
         
     # apply correction to 
     for idx_pxl in range(dset_p_.shape[0]):
-#        dset_p_[idx_pxl, :, 0] += amplitude_lag
         dset_p_[idx_pxl, :, 0] *= amplitude_lag
         dset_p_[idx_pxl, :, 1] += (phase_lag + deviation) * np.pi/180
         
@@ -446,17 +527,52 @@ def _convert_to_rectangular_coordinates(dset_p):
 # ===========================================================================
     
 def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp, demodnum, offset, demod_freqs):
-    """creates and returns parameter required for the energy spectrum reconstruction 
+    """creates and returns parameter required for the energy spectrum 
+    reconstruction 
     
-    This function calculates the parameters needed for the energy spectrum reconstruction. input parameter are
-    the information form the mla data header.
+    This function calculates the parameters needed for the energy spectrum 
+    reconstruction. input parameter are the information form the mla data 
+    header.
+    
+    Parameter
+    ---------
+        pixelNumber | int
+            number of spectra in the MLA dataset. This values is equal to the 
+            number of data blocks in the MLA raw data file.
+        nsamples | int
+            number of measured data points per spectra
+        srate | int
+            sampling rate during the measurement.
+        df | float
+            frequency different between subsequent tones
+        modamp | float
+            modulation amplitude in Volts.
+        demodnum | int
+            number of tones from which spectra are reconstructed
+        offset | float
+            DC component of excitation signal in Volts.
+        demod_freqs | 1d np.array
+            frequency values of the tones used to reconstruct the spectra
+            
+    Returns
+    -------
+        t | 1d np.array
+            vector of time value for one excitaiton period
+        v_t | 1d np.array
+            vector of Volt values for one excitation period
+        first_index | int
+            index of the first harmonics (i.e. base tone)
+        last_index | int
+            index of the last harmonics
+        step_size | float
+            difference between two subsequent tones in parts of ``df``.
     
     Example:
     --------
-    >>> lines = _load_mla_data(mla_data_fn)
-    >>> block_list = _create_block_list(lines)
-    >>> prm = _parse_mla_data_header(block_list)
-    >>> t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
+        >>> lines = _load_mla_data(mla_data_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list)
+        >>> t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
 
     """
     
@@ -495,17 +611,38 @@ def reconstruct_energy_spectra(
     
 
 def get_measurement_data(block_list, prm):
-    """returns the phase- and amplitude corrected measurement data
+    """returns the phase- and amplitude corrected measurement data as 2d array
     
     This function parses the complex frequency values from the text file 
     data blocks and phase- and amplitude corrects them. Returns a 2d np.arrray 
     
+    Parameter
+    ---------
+        block_list | list
+            List where every element corresponds to a block (header, data, ...).
+            One block (i.e. element) consists of a list of lines belonging
+            to that block of data.
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+            
+    Returns
+    -------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).       
+    
     Example:
     --------
-    >>> lines = _load_mla_data(mla_data_fn)
-    >>> block_list = _create_block_list(lines)
-    >>> prm = _parse_mla_data_header(block_list)
-    >>> dset = get_measurement_data(block_list, prm)
+        Load the data and measurement parameter
+        
+        >>> lines = _load_mla_data(mla_data_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list)
+        
+        generate the phase- and amplitude-corrected FFT coefficient matrix
+        
+        >>> dset = get_measurement_data(block_list, prm)
     
     
     """
@@ -531,16 +668,29 @@ def get_energy_spectra(dset, prm):
 def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
     """loades, processes, and saves MLA energyspectra blockwise to text file.
     
-    Function loads fourier coefficient from MLA measurement file, calculates
+    Function loads FFT coefficients from MLA measurement file, calculates
     the energy spectra, and saves the energy values to a text file. This
-    process is done in a block-wise fashion to avoid loading all the data into
-    memory. This function can be used to process large datasets.
+    process is done in a block-wise fashion to avoid loading all the data at
+    once into the memory. This function can be used to process large datasets.
+    
+    Parameter
+    ---------
+        mla_data_fn | str
+            file path to the MLA raw data text file
+        n | int
+            number of blocks into which the MLA data will be parsed for block-
+            processing
+        verbose | bool
+            flag to printout energy-spectra generation progress
     
     
     Example:
     --------
-    >>> mla_data_fn = 'Measurement of 2021-03-07 1432.txt'  # example data file
-    >>> generate_energy_specta(mla_data_fn)
+        This code snipped shows how to generate a txt file with all energy 
+        spectra.
+        
+        >>> mla_data_fn = 'Measurement of 2021-03-07 1432.txt'  # example data file
+        >>> generate_energy_specta(mla_data_fn)
     
     """
     
@@ -590,7 +740,6 @@ def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
         
         if verbose:
             print('converted {0:d}/{1:d}'.format(idx, n_parcles))
-    
     
     # ================
     # save energy values
@@ -862,22 +1011,23 @@ if __name__ == "__main__":
     # # load data
     # # ========================
     # repo_dir = os.path.dirname(os.getcwd())
-    # data_dir = 'data'
-    # data_subdir = '2021-03-07_TSP-MLA_200k_450x450nm'
+    repo_dir = '/home/kh/code/wte2-bulk-qpi'
+    data_dir = 'data'
+    data_subdir = '2021-03-07_TSP-MLA_200k_450x450nm'
     
-    # mla_data_fn = os.path.join(
-    #     repo_dir,
-    #     data_dir,
-    #     data_subdir,
-    #     'Measurement of 2021-03-07 1432.txt'
-    # )
+    mla_data_fn = os.path.join(
+        repo_dir,
+        data_dir,
+        data_subdir,
+        'Measurement of 2021-03-07 1432.txt'
+    )
 
     # # ================================
     # # Example: reconstruct spectra using functions
     # # ================================
-    # lines = _load_mla_data(mla_data_fn)
-    # block_list = _create_block_list(lines)
-    # prm = _parse_mla_data_header(block_list)
+    lines = _load_mla_data(mla_data_fn)
+    block_list = _create_block_list(lines)
+    prm = _parse_mla_data_header(block_list)
     # dset = _parse_all_data_blocks(block_list, prm['demodnum'])
     # dset_p = _convert_to_polar_coordinates(dset)
     # dset_p = _add_amplitude_and_phase_correction(dset_p)

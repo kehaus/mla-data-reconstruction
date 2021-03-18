@@ -100,16 +100,67 @@ DATA_BLOCK_HEADER = "# of trigger:"
 # ===========================================================================
 # load and parse functions
 # ===========================================================================
+class MLAReconstructionException():
+    """ """
+    pass
 
-def _load_mla_data(mla_data_fn):
-    """returns the loaded mla data as a list of data file lines"""
-    f = open(mla_data_fn, 'r')
+# ===========================================================================
+# load and parse functions
+# ===========================================================================
+
+def _load_mla_data(mla_data_fn, mode='r'):
+    """returns the loaded mla data as a list of data file lines
+    
+    Parameter
+    ---------
+        mla_data_fn | str
+            filename of the MLA raw data file to be imported 
+            (e.g. ``Measurement of 2021-03-13 0242.txt``)
+        mode | char
+            specifies the mode in which the file is opened. Check ``open()``
+            for details
+            
+    Returns
+    -------
+        lines | list
+            list where every element is a line from the provided data file
+            
+    Examples
+    --------
+        >>> fn = Measurement of 2021-03-13 0242.txt
+        >>> lines = _load_mla_data(fn, mode='r')
+            
+    
+    """
+    f = open(mla_data_fn, mode)
     lines = f.readlines()
     f.close()
     return lines
 
 def _create_block_list(lines):
-    """returns the mla data as nested list where one list element represents one block of data"""
+    """returns the mla data as nested list where one list element represents 
+    one block of data
+    
+    Function parses the provided list of lines and groups them into blocks and 
+    returns them as a list of blocks. The first list element is the header 
+    block. The following blocks are data blocks where one block corresponds
+    to a recorded spectrum.
+    
+    Parameter
+    ---------
+        lines | list
+            list where every element is a line from the provided data file. 
+            This variable is produced from the ``_load_mla_data`` function.
+            
+    Returns
+    -------
+        block_list | list
+            List where every element corresponds to a block (header, data, ...).
+            One block (i.e. element) consists of a list of lines belonging
+            to that block of data.
+    
+    
+    """
     block_list = [[]]
 
     for line in lines:
@@ -120,20 +171,43 @@ def _create_block_list(lines):
     return block_list
 
 def _parse_mla_data_header(block_list):
-    """returns a dictionary with the measurement parameters parsed from the given header_block
+    """returns a dictionary with the measurement parameters parsed from the 
+    given header_block
     
-    Example:
-    >>> lines = _load_mla_data('mla_data.txt')
-    >>> block_list = _create_block_list(lines)
-    >>> hd_prm = _parse_mla_data_header(block_list)
+    This funtions parses measurement parameter like ``pixelNumber``, ``nsamples``,
+    and ``demod_freqs`` from the header block in the provided block list.
+    The header block is selected as the first element in the block list. 
+    it is important that this is actually the header block otherwise this 
+    function will return an empty dictionary.
     
+    Parameter
+    ---------
+        block_list | list
+            List where every element corresponds to a block (header, data, ...).
+            One block (i.e. element) consists of a list of lines belonging
+            to that block of data.
+            
+    Returns
+    -------
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. 
+    
+    Example
+    -------
+        >>> lines = _load_mla_data('mla_data.txt')
+        >>> block_list = _create_block_list(lines)
+        >>> hd_prm = _parse_mla_data_header(block_list)
+    
+    Raises
+    ------
+        MLAReconstructionException
+            if given block_list does not contain a header block
     
     """
     header_block = block_list[0]
     prm = {}
     for line in header_block:
-#        if "#" in line:
-#            prm['pixelNumber'] = int(line[14:25])
         data_block_list = _get_data_block_list(block_list)
         prm['pixelNumber'] = len(data_block_list)
         if "nsamples" in line:
@@ -150,28 +224,96 @@ def _parse_mla_data_header(block_list):
             prm['offset'] = float(line[9:14])
             
     prm['demod_freqs'] = _parse_mla_demod_frequencies(header_block)
+    
+    if len(prm) == 0:
+        raise MLAReconstructionException("""Given block_list does not have a header block. parsing failed""")
     return prm
     
 def _parse_mla_demod_frequencies(header_block):
-    """returns 1d-array with demodulation frequencies parsed from mla data header block"""
+    """returns 1d-array with demodulation frequencies parsed from mla data 
+    header block
+    
+    This function parses the demodulation frequencies from the given 
+    ``header_block`` and returns them as a 1d np.array. This function is 
+    normally only used in combination with ``_load_mla_data(..)`` and 
+    ``_create_block_list(..)``.
+    
+    
+    Parameter
+    ---------
+        header_block | list
+            list of strings where every string corresponds to a line of the header
+            section from the data file. 
+            
+    Returns
+    -------
+        np.array
+            contains the modulation frequencies.
+            
+    Example
+    -------
+        >>> lines = _load_mla_data('mla_data.txt')
+        >>> block_list = _create_block_list(lines)
+        >>> demod_freqs = _parse_mla_demod_frequencies(block_list[0])
+        
+        
+
+    """
     demod_freq_idx = header_block.index(' demodulating frequencies:\n')
     
-    val_list = [s.replace('\n','').split('  ') for s in header_block[demod_freq_idx+1:]]
+    val_list = [
+        s.replace('\n','').split('  ') for s in header_block[demod_freq_idx+1:]
+    ]
     arr = np.array(val_list, dtype=np.float)
     return arr.reshape((arr.size,))
     
 def _get_data_block_list(block_list):
-    """returns a list of data block extracted from the given block list """
+    """returns a list of data block extracted from the given block list 
+    
+    Selects the data blocks from the given ``block_list`` by comparing the
+    first line of each block with the ``DATA_BLOCK_HEADER`` variable
+    
+    
+    Parameter
+    ---------
+        block_list | list
+            List where every element corresponds to a block (header, data, ...).
+            One block (i.e. element) consists of a list of lines belonging
+            to that block of data.
+            
+    Return
+    ------
+        data_block_list | list
+            list where every element corresponds to a data block. 
+
+    """
     return [block for block in block_list if DATA_BLOCK_HEADER in block[0]]
     
 def _parse_data_block(data_block):
-    """
+    """returns the FFT coefficients from one data block as 1d np.array of 
+    complex values.
+    
+    Parameter
+    ---------
+        data_block | list
+            list of strings where every string corresponds to a line of a
+            data_block. 
+            
+    Return
+    ------
+        1d np.array
+            complex-valued FFT coefficient from one MLA spectrum (i.e. data block)
     
     
-    Example:
-    >>> lines = _load_mla_data(mla_data_fn)
-    >>> block_list = _create_block_list(lines)
-    >>> one_pxl_dset = _parse_data_block(block_list[1])
+    Example
+    -------
+        reconstruct one specta
+        
+        >>> lines = _load_mla_data(mla_data_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> one_spectrum_dset = _parse_data_block(block_list[1])
+    
+    
     
     """
     vals = np.array(
@@ -182,19 +324,48 @@ def _parse_data_block(data_block):
     return data
 
 def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=True):
-    """returns a 2d-array with complex entries representing the fourier coefficients 
+    """returns a 2d-array of FFT coefficients from one MLA dataset
     
-    Example:
-    >>> lines = _load_mla_data(mla_data_fn)
-    >>> block_list = _create_block_list(lines)
-    >>> prm = _parse_mla_data_header(block_list[0])
-    >>> dset = _parse_all_data_blocks(block_list, prm['demodnum'])
+    Compiles a complex-valued 2d array with the FFT coefficients from one MLA 
+    measurement by calling the ``_parse_data_block(..)`` function on every 
+    data block in ``block_list``. 
+    
+    Parameter
+    ---------
+        block_list | list
+            List where every element corresponds to a block (header, data, ...).
+            One block (i.e. element) consists of a list of lines belonging
+            to that block of data.
+        demodnum | int
+            specifies the number of demodulation frequencies. Variable is 
+            defined in the header block and can be imported with the 
+            ``_parse_mla_data_header(..)`` function.
+        remove_compensation_channel | bool
+            specifies if the compensation channel (normally harmonics #32) 
+            should be removed from every set of FFT coefficients.
+    
+    Returns
+    -------
+        dset | 2d np.array
+            contains the FFT coefficients from all spectra in the MLA measurement.
+            
+    
+    Example
+    -------
+        >>> lines = _load_mla_data(mla_data_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list[0])
+        >>> dset = _parse_all_data_blocks(block_list, prm['demodnum'])
+    
+        to select the FFT coefficents for a given spectrum
+        
+        >>> spectrum_idx = 12
+        >>> fftcoeffs = dset[spectrum_idx, :]
     
     
     """
     
-    # remove the header block
-#    block_list = block_list[1:]
+    # retrieve data blocks
     data_block_list = _get_data_block_list(block_list)
     
     # parse data from txt to np.array 
@@ -202,8 +373,9 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
     for idx,data_block in enumerate(data_block_list):
         dset[idx,:] = _parse_data_block(data_block)
         
-    # remove compensation channel form dset
-    dset = _delete_last_fft_tone(dset)
+    # remove compensation channel from dset
+    if remove_compensation_channel:
+        dset = _delete_last_fft_tone(dset)
     return dset
     
 
@@ -278,7 +450,6 @@ def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp, de
     
     This function calculates the parameters needed for the energy spectrum reconstruction. input parameter are
     the information form the mla data header.
-    
     
     Example:
     --------

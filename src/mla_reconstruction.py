@@ -226,7 +226,9 @@ def _parse_mla_data_header(block_list):
     prm['demod_freqs'] = _parse_mla_demod_frequencies(header_block)
     
     if len(prm) == 0:
-        raise MLAReconstructionException("""Given block_list does not have a header block. parsing failed""")
+        raise MLAReconstructionException("""Given block_list does not have a 
+                                         header block. parsing failed"""
+        )
     return prm
     
 def _parse_mla_demod_frequencies(header_block):
@@ -303,7 +305,6 @@ def _parse_data_block(data_block):
     ------
         1d np.array
             complex-valued FFT coefficient from one MLA spectrum (i.e. data block)
-    
     
     Example
     -------
@@ -436,11 +437,10 @@ def _convert_to_polar_coordinates(dset):
     
     """
     
-    # verify that shape matches
+    # verify that dset shape matches
     if len(dset.shape) != 2:
         err_msg = """dset must be a 2d np.array. 
-            Given dset has shape: {:d}
-        """.format(len(dset.shape))
+            Given dset has shape: {:d}""".format(len(dset.shape))
         raise MLAReconstructionException(err_msg)
     
     # allocate memory
@@ -453,7 +453,8 @@ def _convert_to_polar_coordinates(dset):
     return dset_p
     
     
-def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, amplitude_lag=None):
+def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, 
+                                        amplitude_lag=None):
     """applies amplitude and phase correction to the given FFT coefficent matrix
     
     This function applies the predefined ``amplitude_lag`` and ``phase_lag``
@@ -487,8 +488,6 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, 
             phase- and amplitude-corrected FFT coefficient matrix in polar
             coordinates.
     
-    
-    
     """
     
     # create copy of data structure
@@ -510,7 +509,24 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None, 
     return dset_p_
     
 def _convert_to_rectangular_coordinates(dset_p):
-    """ """
+    """converts the given array from polar to cartesian coordinates (i.e. complex
+    value representation
+    
+    Parameter
+    ---------
+        dset_p | 3d np.array
+            FFT coefficient matrix in polar coordinates. The third
+            axes has length two where 0 is the radial part and 1 stands for 
+            the angular part (``dset_p[:,:,0]`` returns a 2d array of all 
+            radial coordinate values).
+
+    Return
+    ------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).            
+    
+    """
     dset_rect = np.empty(dset_p.shape[:2], dtype=np.complex)
     
     for idx_pxl in range(dset_p.shape[0]):
@@ -526,7 +542,8 @@ def _convert_to_rectangular_coordinates(dset_p):
 # data processing -- convert to energy values
 # ===========================================================================
     
-def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp, demodnum, offset, demod_freqs):
+def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp, 
+                                    demodnum, offset, demod_freqs):
     """creates and returns parameter required for the energy spectrum 
     reconstruction 
     
@@ -577,20 +594,75 @@ def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp, de
     """
     
     t = np.arange(nsamples) / srate * demod_freqs[0]
-    #offset = -0.1
     v_t = offset + modamp * np.cos(2 * np.pi * t)
-    #v_t = np.roll(v_t, -500)
+    
     first_index = demod_freqs[0] / df
     last_index = demod_freqs[30] / df
     step_size = (demod_freqs[1] - demod_freqs[0]) / df
+    
     return t, v_t, first_index, last_index, step_size
 
 def reconstruct_energy_spectra(
         dset, prm, t, v_t, first_index, last_index, step_size
     ):
-    """ """
-#    arr = np.zeros([prm['pixelNumber'], prm['nsamples']], dtype='float64')
-#    linarr = np.empty([prm['pixelNumber'], 313], dtype='float64')
+    """returns the reconstructed current, conductance data with the corresponding
+    energy values.
+    
+    This functions generates the current and conductance values from the given
+    FFT coefficient matrix and corresponding measurement parameter. This here 
+    is the main function to reconstruct the MLA measurement. 
+    
+    
+    Parameter
+    ---------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).           
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+        t | 1d np.array
+            vector of time value for one excitaiton period
+        v_t | 1d np.array
+            vector of Volt values for one excitation period
+        first_index | int
+            index of the first harmonics (i.e. base tone)
+        last_index | int
+            index of the last harmonics
+        step_size | float
+            difference between two subsequent tones in parts of ``df``.
+
+    Returns
+    -------
+    linearizedEnergy | 1d np.array
+        energy values at which the current and conductance is reconstructed
+    linarr | 2d np.array
+        matrix of conductance values. 
+    arr | 2d np.array
+        matrix of current values.
+    
+    Example
+    -------
+        Select MLA raw data file
+
+        >>> mla_data_fn = 'Measurement of 2021-03-15 2005.txt'
+        
+        Load MLA data and measurement parameter from txt file
+        
+        >>> lines = _load_mla_data(mla_data_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list)
+        
+        Parse data into np.array
+        
+        >>> dset = get_measurement_data(block_list, prm)
+
+        generate the conductance and current matrices 
+
+        >>> linE, linarr, arr = get_energy_spectra(dset, prm)
+    
+    
+    """
     arr = np.zeros([dset.shape[0], prm['nsamples']], dtype='float64')
     linarr = np.empty([dset.shape[0], 313], dtype='float64')
 
@@ -650,7 +722,6 @@ def get_measurement_data(block_list, prm):
     dset_p = _convert_to_polar_coordinates(dset)
     dset_p = _add_amplitude_and_phase_correction(dset_p)
     dset_rect = _convert_to_rectangular_coordinates(dset_p)
-    # setattr(self, 'dset', dset_rect)
     return dset_rect
     
 def get_energy_spectra(dset, prm):
@@ -797,18 +868,52 @@ def _check_resize_cond(resize_cond, prm):
 
 
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, verbose=False):
-    """ 
+    """loads MLA raw data text file, computes the current and conductance maps, 
+    and stores to a hdf5 file.
     
+    
+    Parameter
+    ---------
+    mla_data_fn | str
+        filename of the MLA raw data txt file
+    resize_curr | tuple
+        defines the axis and their lengths into which the computed data will be 
+        casted. This typically includes the real-spaces axes (i.e. measurement
+        frame pixel width, z-steps number, and energy vector length)
+    resize_cond | tuple
+        defines the axis and their lengths into which the computed data will be 
+        casted. This typically includes the real-spaces axes (i.e. measurement
+        frame pixel width, z-steps number, and energy vector length)
+    verbose | bool
+        specifies if conversion progress should be plotted to the console
+    
+    
+    Returns
+    -------
+        mla_hdf5_fn | str
+            filename of the generated HDF5 data file
     
     Example:
     --------
-    >>> mla_txt_fn = '2021-03-15_TSP-MLA-zsweep_5x5nm_25x25pxl/Measurement of 2021-03-15 2005.txt'
-    >>> mla_fn = _load_mla_data_into_hdf5(
-    ...     mla_txt_fn,
-    ...     resize_curr = (40,25,25,625),
-    ...     resize_cond = (40,25,25,322)
-    ... )
+        Generate the HDF5 data file from a MLA raw data text file
     
+        >>> mla_txt_fn = '2021-03-15_TSP-MLA-zsweep_5x5nm_25x25pxl/Measurement of 2021-03-15 2005.txt'
+        >>> mla_hdf5_fn = _load_mla_data_into_hdf5(
+        ...     mla_txt_fn,
+        ...     resize_curr = (40,25,25,625),
+        ...     resize_cond = (40,25,25,322)
+        ... )
+    
+        Load the current and conductance data from the HDF5 file back into 
+        python
+        
+        >>> import h5py
+        >>> f = h5py.File(mla_hdf5_fn, 'a')
+        >>> cond = f['cond']
+        >>> curr = f['curr']
+        
+        The conductance and current data are now loaded as multi-dimensional 
+        arrays and accessible through the variables ``cond`` and ``curr``.
     
     
     
@@ -931,7 +1036,11 @@ def _generate_curr_and_cond(resize_curr, dset, prm, curr, cond):
 
 
 def _calculate_qpi_maps(mla_hdf5_fn):
-
+    """
+    
+        ** not complete! **
+    
+    """
 
     
     # ========================

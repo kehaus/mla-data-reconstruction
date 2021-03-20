@@ -26,7 +26,7 @@ import h5py
 # static MLA compensation values
 # ===========================================================================
 DEVIATION = 0
-PHASE_LAG = np.array([
+PHASE_LAG =  np.array([
     DEVIATION * -1, 
     1.1, 
     2.2, 
@@ -1120,23 +1120,23 @@ if __name__ == "__main__":
     # # load data
     # # ========================
     # repo_dir = os.path.dirname(os.getcwd())
-    repo_dir = '/home/kh/code/wte2-bulk-qpi'
-    data_dir = 'data'
-    data_subdir = '2021-03-07_TSP-MLA_200k_450x450nm'
+    # repo_dir = '/home/kh/code/wte2-bulk-qpi'
+    # data_dir = 'data'
+    # data_subdir = '2021-03-07_TSP-MLA_200k_450x450nm'
     
-    mla_data_fn = os.path.join(
-        repo_dir,
-        data_dir,
-        data_subdir,
-        'Measurement of 2021-03-07 1432.txt'
-    )
+    # mla_data_fn = os.path.join(
+    #     repo_dir,
+    #     data_dir,
+    #     data_subdir,
+    #     'Measurement of 2021-03-07 1432.txt'
+    # )
 
     # # ================================
     # # Example: reconstruct spectra using functions
     # # ================================
-    lines = _load_mla_data(mla_data_fn)
-    block_list = _create_block_list(lines)
-    prm = _parse_mla_data_header(block_list)
+    # lines = _load_mla_data(mla_data_fn)
+    # block_list = _create_block_list(lines)
+    # prm = _parse_mla_data_header(block_list)
     # dset = _parse_all_data_blocks(block_list, prm['demodnum'])
     # dset_p = _convert_to_polar_coordinates(dset)
     # dset_p = _add_amplitude_and_phase_correction(dset_p)

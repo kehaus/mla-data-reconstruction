@@ -663,6 +663,9 @@ def reconstruct_energy_spectra(
     
     
     """
+    e_min = -0.117; e_max = 0.278; e_res = 0.005
+    
+    
     arr = np.zeros([dset.shape[0], prm['nsamples']], dtype='float64')
     linarr = np.empty([dset.shape[0], 313], dtype='float64')
 
@@ -984,18 +987,24 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     
     Parameter
     ---------
-    mla_data_fn | str
-        filename of the MLA raw data txt file
-    resize_curr | tuple
-        defines the axis and their lengths into which the computed data will be 
-        casted. This typically includes the real-spaces axes (i.e. measurement
-        frame pixel width, z-steps number, and energy vector length)
-    resize_cond | tuple
-        defines the axis and their lengths into which the computed data will be 
-        casted. This typically includes the real-spaces axes (i.e. measurement
-        frame pixel width, z-steps number, and energy vector length)
-    verbose | bool
-        specifies if conversion progress should be plotted to the console
+        mla_data_fn | str
+            filename of the MLA raw data txt file
+        resize_curr | tuple
+            defines the axis and their lengths into which the computed data 
+            will be  casted. This typically includes the real-spaces axes (i.e. 
+            measurement frame pixel width, z-steps number, and energy vector 
+            length)
+        resize_cond | tuple
+            defines the axis and their lengths into which the computed data will be 
+            casted. This typically includes the real-spaces axes (i.e. measurement
+            frame pixel width, z-steps number, and energy vector length)
+        zsweep_nr | int
+            number of zsweeps per measurement location. This is a measurement
+            parameter.
+        missing_pxl_idx | int
+            index at which the dummy data blocks will be inserted
+        verbose | bool
+            specifies if conversion progress should be plotted to the console
     
     
     Returns

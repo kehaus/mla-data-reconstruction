@@ -156,7 +156,7 @@ def _create_block_list(lines):
     -------
         block_list | list
             List where every element corresponds to a block (header, data, ...).
-            One block (i.e. element) consists of a list of lines belonging
+            One block (i.e. list element) consists of a list of lines belonging
             to that block of data.
     
     
@@ -377,8 +377,8 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
     if remove_compensation_channel:
         dset = _delete_last_fft_tone(dset)
     return dset
-    
 
+    
 # ===========================================================================
 # data processing -- add phase and amplitude lag
 # ===========================================================================
@@ -821,6 +821,114 @@ def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
     
     return
 
+
+# ===========================================================================
+# data processing -- zero-pad missing trigger
+# ===========================================================================
+
+
+def _zeropad_missing_pxl(data_block_list, missing_pxl_idx, zsweep_nr,
+                             prm):
+    """inserts n= ``zsweep_nr`` dummy data blocks into the given 
+    ``data_block_list`` at the index ``missing_pxl_idx``
+    
+    Parameter
+    --------
+        data_block_list | list
+            list where every element corresponds to a data block. 
+        missing_pxl_idx | int
+            index at which the dummy data blocks will be inserted
+        zsweep_nr | int
+            number of zsweeps per measurement location. This is a measurement
+            parameter.
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+        
+    Returns
+    -------
+        None
+        
+    Attention
+    ---------
+        The ``missing_pxl_idx`` variable refers to the number of the physical
+        measurement location, not to the spectrum idx number. The relation 
+        between those to index number is given as
+            >>> spectrum_idx = missing_pxl_idx * zsweep_nr
+        
+
+    Example
+    -------
+        Load the MLA ``data_block_list`` from text file
+        
+        >>> lines = _load_mla_data(mla_txt_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list)
+        >>> data_block_list = _get_data_block_list(block_list)
+     
+        Zero-pad the missing pixels
+        
+        >>> missing_pxl_idx = 52178
+        >>> zsweep_nr = 40
+        >>> _zeropad_missing_pxl(data_block_lost, missing_pxl, zsweep_nr, prm)
+    
+    """
+    for dummy_db in [_create_dummy_data_block(prm) for i in range(zsweep_nr)]:
+        data_block_list.insert(
+            missing_pxl_idx*zsweep_nr, 
+            dummy_db
+        )
+        data_block_list.pop(-1)
+    return 
+
+
+def _create_dummy_data_block(prm):
+    """returns a dummy datablock with all FFT coefficients set zo zero.
+    
+    This function is mainly used to provide dummy data blocks for zero-padding
+    data sets where missing triggers occured (missing trigger refers to 
+    measurement setup issue where the MLA hardware didn't record at all 
+    measurement locations).
+    
+    Parameter
+    ---------
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. 
+    
+    Returns
+    -------
+        dummy_data_block | list
+            list of strings where every string corresponds to a line of a
+            data_block. This data block has all FFT coefficient set to zero.
+
+    Example
+    -------
+        Creating a dummy datablock requires to have the data parameter ready
+    
+        >>> lines = _load_mla_data(mla_txt_fn)
+        >>> block_list = _create_block_list(lines)
+        >>> prm = _parse_mla_data_header(block_list)
+        >>> dummy_data_block = _create_dummy_data_block(prm)
+    
+        the dummy data block can be converted to dummy float values by calling
+        
+        >>> dummy_data_block_list = 10*[dummy_data_block]
+        >>> dummy_dset = get_measurement_data(
+        ...     dummy_data_block_list, 
+        ...     prm
+        ... )
+        
+    
+    """
+    hd = [
+        '# of trigger: -1 \n',
+        ' Real Part\t Imaginary Part\n',
+    ]
+    line = '{0:.8e}\t {1:.8e}\n'.format(0,0)
+    return hd + prm['demodnum']*[line]
+
+
 # ===========================================================================
 # MLA dataset
 # ===========================================================================
@@ -867,7 +975,9 @@ def _check_resize_cond(resize_cond, prm):
 
 
 
-def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, verbose=False):
+def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
+                             zsweep_nr=40, missing_pxls=None, 
+                             verbose=False):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
     
@@ -931,7 +1041,21 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
     if verbose: print('\t ...completed.\n')
 
     # ========================
-    # check if specified arr size matches data
+    # zero-pad for missing trigger
+    # ========================        
+    if missing_pxls == None:
+        missing_pxls = []
+    
+    for missing_pxl_idx in missing_pxls:
+        _zeropad_missing_pxl(
+            data_block_list, 
+            missing_pxl_idx, 
+            zsweep_nr, 
+            prm
+        )
+
+    # ========================
+    # check if specified arr size matches data length
     # ========================        
     if resize_curr != False:
         _check_resize_curr(resize_curr, prm)

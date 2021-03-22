@@ -592,18 +592,17 @@ def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp,
         >>> t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
 
     """
-    
     t = np.arange(nsamples) / srate * demod_freqs[0]
     v_t = offset + modamp * np.cos(2 * np.pi * t)
     
-    first_index = demod_freqs[0] / df
-    last_index = demod_freqs[30] / df
-    step_size = (demod_freqs[1] - demod_freqs[0]) / df
+    first_index = int(demod_freqs[0] / df)
+    last_index = int(demod_freqs[30] / df)
+    step_size = int((demod_freqs[1] - demod_freqs[0]) / df)
     
     return t, v_t, first_index, last_index, step_size
 
 def reconstruct_energy_spectra(
-        dset, prm, t, v_t, first_index, last_index, step_size
+        dset, prm, t, v_t, first_index, last_index, step_size, use_trace='bwd'
     ):
     """returns the reconstructed current, conductance data with the corresponding
     energy values.
@@ -631,14 +630,19 @@ def reconstruct_energy_spectra(
             index of the last harmonics
         step_size | float
             difference between two subsequent tones in parts of ``df``.
+        use_trace | (``fwd`` | ``bwd`` | ``both``)
+            indicates which part of the reconstructed spectrum will be used
+            to construct the ``curr`` and ``cond`` matrices. Valid values are
+            ``fwd``: use the forward trace; ``bwd``: use the backward trace; 
+            or ``both``: use the average of fwd and bwd trace.
 
     Returns
     -------
     linearizedEnergy | 1d np.array
         energy values at which the current and conductance is reconstructed
-    linarr | 2d np.array
+    cond | 2d np.array
         matrix of conductance values. 
-    arr | 2d np.array
+    curr | 2d np.array
         matrix of current values.
     
     Example
@@ -663,26 +667,136 @@ def reconstruct_energy_spectra(
     
     
     """
-    e_min = -0.117; e_max = 0.278; e_res = 0.005
     
+    e_res = 0.005   # [V]
+    linearizedEnergy = get_linearized_energy(prm, e_res=e_res)
+    e_nr = len(linearizedEnergy)
     
-    arr = np.zeros([dset.shape[0], prm['nsamples']], dtype='float64')
-    linarr = np.empty([dset.shape[0], 313], dtype='float64')
 
-    linearizedEnergy = np.linspace(-0.117, 0.278, 313)
-
+    curr = np.zeros([dset.shape[0], e_nr], dtype='float64')
+    cond = np.empty([dset.shape[0], e_nr], dtype='float64')
+    
     for idx, row in enumerate(dset):
-        dataset = np.zeros(prm['nsamples'], dtype=np.complex)
-        dataset[int(first_index): int(last_index) + int(step_size): int(step_size)] = row[0:31:1]
-        recon_pixels = np.fft.ifft(dataset)
+        
+        # ======
+        # reconstruct current from FFT coefficients
+        # ======
+        fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
+        fft_coeff_vec[first_index:last_index + step_size: step_size] = row
+        recon_pixels = np.fft.ifft(fft_coeff_vec)
         recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
-        arr[idx, :] = recon_pixels_amp
-        f = interpolate.interp1d(v_t[313:625], recon_pixels_amp[313:625])
-        linarr[idx, :] = f(linearizedEnergy)
+#        curr[idx, :] = recon_pixels_amp
+        
+        # ======
+        # create interpolated values for the conductance computation
+        # ======
+        if use_trace == 'fwd':
+            f = interpolate.interp1d(
+                v_t[:prm['nsamples']//2], 
+                recon_pixels_amp[:prm['nsamples']//2]
+            )
+        elif use_trace == 'bwd':
+            f = interpolate.interp1d(
+                v_t[prm['nsamples']//2:], 
+                recon_pixels_amp[prm['nsamples']//2:]
+            )
+        elif use_trace == 'both':
+            f = interpolate.interp1d(
+                v_t, 
+                recon_pixels_amp
+            )
+        else: 
+            raise ValueError(
+                "Given use_trace: {} is not valid!".format(use_trace)
+            )
+        
+        # ====
+        # fillin curren values
+        # ====
+        curr[idx, :] = f(linearizedEnergy)
+        
+        # ====
+        # fillin conductance values
+        # ====
+        dE = np.diff(linearizedEnergy)[0]
+        lin_en_ = np.concatenate([
+            linearizedEnergy-dE, [linearizedEnergy[-1]+dE]
+        ])
+        cond[idx, :] = np.diff(lin_en_)
+        
+        
+#    cond = np.diff(curr)
+    
+    return linearizedEnergy, cond, curr
 
-#    linarr = np.diff(linarr) * -1
-    linarr = np.diff(linarr)
-    return linearizedEnergy, linarr, arr
+
+def get_linearized_energy(prm, e_res=0.005):
+    """returns linearized energy values calculated from the MLA modulation 
+    amplitude and offset, and the given energy resolution ``e_res``
+    
+    Paramter
+    --------
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+        e_res | float
+            energy resolution -- given in volts -- specifies the spacing 
+            between subsequent values in the returned linearized energy np.array
+            
+    Returns
+    -------
+        linearized_energy | 1d np.array
+            linearized energy values calculated from the MLA modulation 
+            amplitude and offset.
+            
+            
+    """
+    e_min = prm['offset'] - prm['modamp'] + e_res/2
+    e_max = e_max = prm['offset'] + prm['modamp']
+    
+    return np.arange(e_min, e_max, e_res)
+    
+    
+
+#     arr = np.zeros([dset.shape[0], prm['nsamples']], dtype='float64')
+#     linarr = np.empty([dset.shape[0], e_nr], dtype='float64')
+
+#     # linearizedEnergy = np.linspace(-0.117, 0.278, 313)
+
+#     for idx, row in enumerate(dset):
+        
+#         # ======
+#         # reconstruct current from FFT coefficients
+#         # ======
+#         fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
+# #        fft_coeff_vec[int(first_index): int(last_index) + int(step_size): int(step_size)] = row[0:31:1]
+#         fft_coeff_vec[first_index:last_index + step_size: step_size] = row
+#         recon_pixels = np.fft.ifft(fft_coeff_vec)
+#         recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
+#         arr[idx, :] = recon_pixels_amp
+        
+#         # ======
+#         # create interpolated values for the conductance computation
+#         # ======
+#         f = interpolate.interp1d(
+#             v_t[313:625], 
+#             recon_pixels_amp[313:625]
+#         )
+#         linarr[idx, :] = f(linearizedEnergy)
+
+#     # =====
+#     # calculate the conductance
+#     # =====
+# #    linarr = np.diff(linarr) * -1
+#     linarr = np.diff(linarr)
+    
+# #    return linearizedEnergy, linarr, arr
+
+    # ========================================================================
+    # =======================================================================
+            
+
+        
     
 
 def get_measurement_data(block_list, prm):
@@ -936,33 +1050,37 @@ def _create_dummy_data_block(prm):
 # MLA dataset
 # ===========================================================================
 
-def _check_resize_curr(resize_curr, prm):
+def _check_resize_curr(resize_curr, prm, e_res):
     """raises a ValueError if the given resize_curr doesn't match the dataset
     size specified in prm
     
     """
+    lin_en = lin_en = get_linearized_energy(prm, e_res=e_res)
+    nsamples = len(lin_en)
+    
     err_msg = """ Given resize_curr: {0:} is not compatible with the loaded data:
-        pixelNumber: {1:d}; nsamples: {2:d}""".format(
+        pixelNumber: {1:d}; and linearized-energy spacing: {2:d}""".format(
             resize_curr,
             prm['pixelNumber'],
-            prm['nsamples']
+            nsamples
     )
     
     if not prm['pixelNumber'] == np.product(resize_curr[:-1]):
         raise ValueError(err_msg)
         
-    if not prm['nsamples'] == resize_curr[-1]:
+    if not nsamples == resize_curr[-1]:
         raise ValueError(err_msg)
         
     return
 
 
-def _check_resize_cond(resize_cond, prm):
+def _check_resize_cond(resize_cond, prm, e_res):
     
-    nsamples = int(prm['nsamples']/2)
+    lin_en = lin_en = get_linearized_energy(prm, e_res=e_res)
+    nsamples = len(lin_en)
     
     err_msg = """ Given resize_cond: {0:} is not compatible with the loaded data:
-        pixelNumber: {1:d}; nsamples: {2:d}""".format(
+        pixelNumber: {1:d}; and linearized-energy spacing: {2:d}""".format(
             resize_cond,
             prm['pixelNumber'],
             nsamples
@@ -984,6 +1102,14 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
     
+    Attention
+    ---------
+        It is important that the last element in ``resize_curr`` and 
+        ``resize_cond`` matches which the number of linearized-energy values,
+        that will be used for the energy-spectrum reconstruction. The number
+        of linearized-energy values can be deduced by calling the function
+        ``get_linearized_energy(..)`` with the ``prm`` dictionary of the 
+        corresponding MLA rawdataset.
     
     Parameter
     ---------
@@ -1037,6 +1163,7 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     
     
     """
+    e_res = 0.005
     
     # ========================
     # load measurement data from txt file
@@ -1067,14 +1194,16 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     # check if specified arr size matches data length
     # ========================        
     if resize_curr != False:
-        _check_resize_curr(resize_curr, prm)
+        _check_resize_curr(resize_curr, prm, e_res)
     else: 
-        resize_curr = (prm['pixelNumber'], prm['nsamples'])
+        lin_en = get_linearized_energy(prm, e_res=e_res)
+        resize_curr = (prm['pixelNumber'], len(lin_en))
 
     if resize_cond != False:
-        _check_resize_cond(resize_cond, prm)
+        _check_resize_cond(resize_cond, prm, e_res)
     else: 
-        resize_cond = (prm['pixelNumber'], int(prm['nsamples']/2))
+        lin_en = get_linearized_energy(prm, e_res=e_res)
+        resize_cond = (prm['pixelNumber'], len(lin_en))
     
     
     # ========================
@@ -1115,7 +1244,7 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         dset[idx*n:(idx+1)*n] = arr
         
         print('dset - converted {0:d}/{1:d}'.format(idx, n_parcels))
-          
+        
         
     # ========================
     # calculate energy spectra
@@ -1143,6 +1272,14 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         dtype=np.float
     )
     lin_en[:] = linE[:]
+    
+    
+    # ========================
+    # store measurement prm as dset attributes
+    # ========================
+    for k,v in prm.items():
+        dset.attrs[k] = v
+
 
     # ========================
     # close hdf5 file

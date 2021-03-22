@@ -722,7 +722,7 @@ def reconstruct_energy_spectra(
         lin_en_ = np.concatenate([
             linearizedEnergy-dE, [linearizedEnergy[-1]+dE]
         ])
-        cond[idx, :] = np.diff(lin_en_)
+        cond[idx, :] = np.diff(f(lin_en_))
         
         
 #    cond = np.diff(curr)

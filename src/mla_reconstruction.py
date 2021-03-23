@@ -600,6 +600,14 @@ def _setup_reconstruction_parameter(pixelNumber, nsamples, srate, df, modamp,
     
     return t, v_t, first_index, last_index, step_size
 
+def _get_excitation_time_values(prm):
+    """ """
+    return np.arange(prm['nsamples']) / prm['srate'] * prm['demod_freqs'][0]
+
+def _get_excitation_voltage_signal(t, prm):
+    """ """
+    return prm['offset'] + prm['modamp'] * np.cos(2 * np.pi * t)
+
 def reconstruct_energy_spectra(
         dset, prm, t, v_t, first_index, last_index, step_size, use_trace='bwd'
     ):

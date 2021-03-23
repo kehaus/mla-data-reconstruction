@@ -229,7 +229,72 @@ def _parse_mla_data_header(block_list):
                                          header block. parsing failed"""
         )
     return prm
+
+def _count_pixelNumber(mla_txt_fn, mode='r', verbose=False):
+    """ """
+    pixelNumber = -1 # start at -1 because there is n+1 '\n' for n data blocks
     
+    f = open(mla_txt_fn, mode)
+    s_ = 'start'
+    while s_ != '':
+        s_ = f.readline()
+        if s_ == '\n':
+            pixelNumber += 1
+            if verbose: 
+                if pixelNumber%1000 == 0:
+                    print('pixelNumber: ', pixelNumber)
+
+    f.close()
+    
+    return pixelNumber
+    
+def _load_mla_data_header(mla_txt_fn, pixel_number=None, mode='r', 
+                          readline_nr=100, verbose=False):
+    """ """ 
+    
+    # load first lines from file
+    f = open(mla_txt_fn, mode)
+    lines = []
+    for i in range(readline_nr):
+        lines.append(f.readline())
+    f.close()
+
+    # create block lists:
+    block_list = _create_block_list(lines)
+    header_block = block_list[0]
+    
+    
+    prm = {}
+    for line in header_block:
+#        data_block_list = _get_data_block_list(block_list)
+        if pixel_number == None:
+            pixel_number = _count_pixelNumber(
+                mla_txt_fn, mode=mode, verbose=verbose
+            )
+        prm['pixelNumber'] = pixel_number
+        if "nsamples" in line:
+            prm['nsamples'] = int(line[11:17])
+        if "srate" in line:
+            prm['srate'] = int(line[8:15])
+        if "bandwidth" in line:
+            prm['df'] = int(line[24:28])
+        if "amplitude" in line:
+            prm['modamp'] = float(line[23:26])
+        if "number" in line:
+            prm['demodnum'] = int(line[37:39])
+        if "offset" in line:
+            prm['offset'] = float(line[9:14])
+            
+    prm['demod_freqs'] = _parse_mla_demod_frequencies(header_block)
+    
+    if len(prm) == 0:
+        raise MLAReconstructionException("""Given block_list does not have a 
+                                         header block. parsing failed"""
+        )
+    return prm
+
+
+
 def _parse_mla_demod_frequencies(header_block):
     """returns 1d-array with demodulation frequencies parsed from mla data 
     header block
@@ -272,7 +337,8 @@ def _get_data_block_list(block_list):
     """returns a list of data block extracted from the given block list 
     
     Selects the data blocks from the given ``block_list`` by comparing the
-    first line of each block with the ``DATA_BLOCK_HEADER`` variable
+    first line of each block with the ``DATA_BLOCK_HEADER`` variable. Function
+    ignores empty blocks.
     
     
     Parameter
@@ -288,7 +354,13 @@ def _get_data_block_list(block_list):
             list where every element corresponds to a data block. 
 
     """
-    return [block for block in block_list if DATA_BLOCK_HEADER in block[0]]
+    data_block_list = []
+    for block in block_list:
+        if len(block) > 0:
+            if DATA_BLOCK_HEADER in block[0]:
+                data_block_list.append(block)
+    return data_block_list
+ #   return [block for block in block_list if DATA_BLOCK_HEADER in block[0]]
     
 def _parse_data_block(data_block):
     """returns the FFT coefficients from one data block as 1d np.array of 
@@ -727,7 +799,7 @@ def reconstruct_energy_spectra(
         # ====
         dE = np.diff(linearizedEnergy)[0]
         lin_en_ = np.concatenate([
-            linearizedEnergy-dE, [linearizedEnergy[-1]+dE]
+            linearizedEnergy-dE/2, [linearizedEnergy[-1]+dE/2]
         ])
         cond[idx, :] = np.diff(f(lin_en_))
         
@@ -758,7 +830,8 @@ def get_linearized_energy(prm, e_res=0.005):
             
             
     """
-    e_min = prm['offset'] - prm['modamp'] + e_res/2
+#    e_min = prm['offset'] - prm['modamp'] + e_res/2
+    e_min = prm['offset'] - prm['modamp'] + e_res
     e_max = e_max = prm['offset'] + prm['modamp']
     
     return np.arange(e_min, e_max, e_res)
@@ -1104,7 +1177,7 @@ def _check_resize_cond(resize_cond, prm, e_res):
 
 
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
-                             zsweep_nr=40, missing_pxls=None, 
+                             pixel_number=None, zsweep_nr=40, missing_pxls=None, 
                              verbose=False):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
@@ -1131,6 +1204,8 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
             defines the axis and their lengths into which the computed data will be 
             casted. This typically includes the real-spaces axes (i.e. measurement
             frame pixel width, z-steps number, and energy vector length)
+        pixel_number | int
+            number of spectra stored in the MLA raw data file
         zsweep_nr | int
             number of zsweeps per measurement location. This is a measurement
             parameter.
@@ -1173,30 +1248,11 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     e_res = 0.005
     
     # ========================
-    # load measurement data from txt file
+    # load measurement parameter
     # ========================    
-    if verbose: print('load mla data from text file')
-    lines = _load_mla_data(mla_data_fn)
-    block_list = _create_block_list(lines)
-    prm = _parse_mla_data_header(block_list)
-    data_block_list = _get_data_block_list(block_list)    
-
-    if verbose: print('\t ...completed.\n')
-
-    # ========================
-    # zero-pad for missing trigger
-    # ========================        
-    if missing_pxls == None:
-        missing_pxls = []
+    prm = _load_mla_data_header(mla_data_fn, pixel_number=pixel_number)
     
-    for missing_pxl_idx in missing_pxls:
-        _zeropad_missing_pxl(
-            data_block_list, 
-            missing_pxl_idx, 
-            zsweep_nr, 
-            prm
-        )
-
+    
     # ========================
     # check if specified arr size matches data length
     # ========================        
@@ -1234,6 +1290,34 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         resize_cond,
         dtype=np.float
     )
+    
+    # ========================
+    # load measurement parameter
+    # ========================    
+
+    if verbose: print('load mla data from text file')
+    
+    lines = _load_mla_data(mla_data_fn)
+    block_list = _create_block_list(lines)
+    
+    data_block_list = _get_data_block_list(block_list)    
+
+    if verbose: print('\t ...completed.\n')
+
+    # ========================
+    # zero-pad for missing trigger
+    # ========================        
+    if missing_pxls == None:
+        missing_pxls = []
+    
+    for missing_pxl_idx in missing_pxls:
+        _zeropad_missing_pxl(
+            data_block_list, 
+            missing_pxl_idx, 
+            zsweep_nr, 
+            prm
+        )
+
     
     
     # ========================

@@ -9,7 +9,8 @@ This code library is intended to host python scripts related to the reconstructi
 ## Requirements
 * Numpy
 * Matplotlib
+* Scipy 
 * h5py ([link](https://www.h5py.org/))
-
+* Jupyter notebook (only to run the examples)
 
 

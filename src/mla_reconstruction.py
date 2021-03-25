@@ -1212,6 +1212,244 @@ def _check_resize_cond(resize_cond, prm, e_res):
 
 
 
+def _load_mla_data_into_hdf5_dev(mla_data_fn, resize_curr=False, resize_cond=False, 
+                             pixel_number=None, zsweep_nr=40, missing_pxls=None,
+                             deviation=None, phase_lag=None, amplitude_lag=None,
+                             mode='a', verbose=False):
+    """ """
+    e_res = 0.005
+    
+    
+    # ========================
+    # set amplitude and phase lag
+    # ========================    
+    if deviation is None:
+        deviation = DEVIATION
+    if phase_lag is None:
+        phase_lag = PHASE_LAG
+    if amplitude_lag is None:
+        amplitude_lag = AMPLITUDE_LAG
+
+    # ========================
+    # open txt file
+    # ========================    
+    f_txt = open(mla_data_fn, 'r')
+    
+    # ========================
+    # load measurement parameter
+    # ========================    
+    prm = _load_mla_data_header(mla_data_fn, pixel_number=pixel_number)
+    
+    # ========================
+    # check if specified arr size matches data length
+    # ========================        
+    if resize_curr != False:
+        _check_resize_curr(resize_curr, prm, e_res)
+    else: 
+        lin_en = get_linearized_energy(prm, e_res=e_res)
+        resize_curr = (prm['pixelNumber'], len(lin_en))
+
+    if resize_cond != False:
+        _check_resize_cond(resize_cond, prm, e_res)
+    else: 
+        lin_en = get_linearized_energy(prm, e_res=e_res)
+        resize_cond = (prm['pixelNumber'], len(lin_en))
+    
+    
+    # ========================
+    # create hdf5 data structure
+    # ========================
+    mla_hdf5_fn = mla_data_fn.replace('.txt', '.hdf5')
+    f = h5py.File(mla_hdf5_fn, mode=mode)
+    
+    dset = f.create_dataset(
+        'dset', 
+        (prm['pixelNumber'], prm['demodnum']-1),
+        dtype=np.complex128
+    )
+    curr = f.create_dataset(
+        'curr', 
+        resize_curr,
+        dtype=np.float
+    )
+    cond = f.create_dataset(
+        'cond', 
+        resize_cond,
+        dtype=np.float
+    )
+    
+    # ========================
+    # load measurement parameter
+    # ========================    
+
+    if verbose: print('load mla data from text file')
+    
+    lines = _load_mla_data(mla_data_fn)
+    block_list = _create_block_list(lines)
+    
+    data_block_list = _get_data_block_list(block_list)    
+
+    if verbose: print('\t ...completed.\n')
+
+    # ========================
+    # zero-pad for missing trigger
+    # ========================        
+    if missing_pxls == None:
+        missing_pxls = []
+    
+    for missing_pxl_idx in missing_pxls:
+        _zeropad_missing_pxl(
+            data_block_list, 
+            missing_pxl_idx, 
+            zsweep_nr, 
+            prm
+        )
+
+    # ========================
+    # remove header block before starting data extraction
+    # ========================                
+    hd_block_lines = []
+    s_ = f_txt.readline()
+    while not s_ in ['\n', '']:
+        hd_block_lines.append(s_)
+        s_ = f_txt.readline()
+    
+# =========================================================================
+# =========================================================================
+
+    # ========================
+    # load, process, and store one spectrum at a time
+    # ========================        
+    for idx in range(prm['pixelNumber']):
+        if idx%10 == 0:
+            print('Processed {0:d}/{1:d}'.format(idx, prm['pixelNumber']))
+        
+        # ====================
+        # read one data block
+        # ====================
+        block_lines = []
+        s_ = f_txt.readline()
+        while not s_ in ['\n', '']:
+            block_lines.append(s_)
+            s_ = f_txt.readline()
+        
+        # ====================
+        # parse block lines into data blocks
+        # ====================
+        block_list = _create_block_list(block_lines)
+        data_blocks = _get_data_block_list(block_list)
+    
+        # ====================
+        # reconstruct spectra & populate hdf5 datasets
+        # ====================    
+        if len(data_blocks) > 0:
+            arr_ = get_measurement_data(
+                data_blocks, 
+                prm,
+                deviation=deviation,
+                phase_lag=phase_lag,
+                amplitude_lag=amplitude_lag
+            )
+            dset[idx:idx+len(data_blocks)] = arr_
+        
+            linE, cond_arr, curr_arr = get_energy_spectra(
+                dset[idx:idx+len(data_blocks)], 
+                prm
+            )
+            cond[idx:idx+len(data_blocks)] = cond_arr
+            curr[idx:idx+len(data_blocks)] = curr_arr
+
+# =========================================================================
+# =========================================================================
+        
+        
+        
+        
+
+    # # ========================
+    # # load fft coefficients into hdf5
+    # # ========================
+    # n = 1000
+    # data_block_parcels = [
+    #     data_block_list[i:i+n] for i in range(0, len(data_block_list), n)
+    # ]
+    # n_parcels = len(data_block_parcels)
+
+
+    # for idx, sub_block in enumerate(data_block_parcels):
+    #     arr = get_measurement_data(
+    #         sub_block, 
+    #         prm,
+    #         deviation=deviation,
+    #         phase_lag=phase_lag,
+    #         amplitude_lag=amplitude_lag
+    #     )
+    #     dset[idx*n:(idx+1)*n] = arr
+        
+    #     print('dset - converted {0:d}/{1:d}'.format(idx, n_parcels))
+        
+        
+    # # ========================
+    # # calculate energy spectra
+    # # ========================
+    # curr_idcs = itertools.product(*[range(i) for i in resize_curr[:-1]])
+    # for dset_idx, curr_idx in enumerate(curr_idcs):
+    #     linE, cond_arr, curr_arr = get_energy_spectra(
+    #         dset[dset_idx:dset_idx+1], 
+    #         prm
+    #     )
+    #     cond[curr_idx] = cond_arr
+    #     curr[curr_idx] = curr_arr
+
+    #     print('cond - converted {0:d}/{1:d}'.format(dset_idx, prm['pixelNumber']))
+    
+    # ========================
+    # save linearized energy values
+    # ========================    
+    lin_en = f.create_dataset(
+        'lin_en', 
+        linE.shape,
+        maxshape = (None,),
+        chunks=True,
+        dtype=np.float
+    )
+    lin_en[:] = linE[:]
+        
+    # ========================
+    # store measurement prm as dset attributes
+    # ========================
+    for k,v in prm.items():
+        dset.attrs[k] = v
+        
+    # ========================
+    # store amplitude- and phase lag calibration values
+    # ========================
+    mla_calibration = {
+        'amplitude_lag': amplitude_lag,
+        'phase_lag':     phase_lag,
+        'deviation':     deviation
+    }
+    
+    mla_calib = f.create_dataset(
+        'mla_calibration', 
+        resize_cond,
+        dtype=np.float
+    )
+    for k,v in mla_calibration.items():
+        mla_calib.attrs[k] = v
+    
+
+    # ========================
+    # close hdf5 and txt file
+    # ========================        
+    f.close()
+    f_txt.close()
+    
+    return mla_hdf5_fn
+
+
+
+
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
                              pixel_number=None, zsweep_nr=40, missing_pxls=None,
                              deviation=None, phase_lag=None, amplitude_lag=None,
@@ -1222,7 +1460,7 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     Attention
     ---------
         It is important that the last element in ``resize_curr`` and 
-        ``resize_cond`` matches which the number of linearized-energy values,
+        ``resize_cond`` matches whith the number of linearized-energy values,
         that will be used for the energy-spectrum reconstruction. The number
         of linearized-energy values can be deduced by calling the function
         ``get_linearized_energy(..)`` with the ``prm`` dictionary of the 
@@ -1378,8 +1616,6 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
             prm
         )
 
-    
-    
     # ========================
     # load fft coefficients into hdf5
     # ========================
@@ -1454,8 +1690,6 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     for k,v in mla_calibration.items():
         mla_calib.attrs[k] = v
     
-    
-
 
     # ========================
     # close hdf5 file

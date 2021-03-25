@@ -99,7 +99,7 @@ DATA_BLOCK_HEADER = "# of trigger:"
 # ===========================================================================
 # load and parse functions
 # ===========================================================================
-class MLAReconstructionException():
+class MLAReconstructionException(Exception()):
     """ """
     pass
 
@@ -558,7 +558,16 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None,
         3d np.array
             phase- and amplitude-corrected FFT coefficient matrix in polar
             coordinates.
-    
+        deviation | float
+            constant offset applied to the phase lag values
+        phase_lag | 1d np.array
+            phase lags values for every higher harmonic. Length has to match 
+            the FFT-coefficient length in ``dset_p``. 
+        amplitude_lag | 1d np.array
+            ampltiude lag values for every higher harmonic. Length has to match
+            the FFT-coefficient length in ``dset_p``.    
+            
+            
     """
     
     # create copy of data structure
@@ -577,7 +586,7 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None,
         dset_p_[idx_pxl, :, 0] *= amplitude_lag
         dset_p_[idx_pxl, :, 1] += (phase_lag + deviation) * np.pi/180
         
-    return dset_p_
+    return dset_p_, deviation, phase_lag, amplitude_lag
     
 def _convert_to_rectangular_coordinates(dset_p):
     """converts the given array from polar to cartesian coordinates (i.e. complex
@@ -879,7 +888,8 @@ def get_linearized_energy(prm, e_res=0.005):
         
     
 
-def get_measurement_data(block_list, prm):
+def get_measurement_data(block_list, prm, deviation=None, phase_lag=None, 
+                         amplitude_lag=None):
     """returns the phase- and amplitude corrected measurement data as 2d array
     
     This function parses the complex frequency values from the text file 
@@ -894,7 +904,15 @@ def get_measurement_data(block_list, prm):
         prm | dict
             contains the measurement parameter present in the datafile header
             block. Can be generated with the ``_parse_mla_data_header(..)``.
-            
+        deviation | float
+            constant offset applied to the phase lag values
+        phase_lag | 1d np.array
+            phase lags values for every higher harmonic. Length has to match 
+            the FFT-coefficient length in ``dset_p``.
+        amplitude_lag | 1d np.array
+            ampltiude lag values for every higher harmonic. Length has to match
+            the FFT-coefficient length in ``dset_p``.
+
     Returns
     -------
         dset | 2d np.array
@@ -916,11 +934,29 @@ def get_measurement_data(block_list, prm):
     
     """
     dset = _parse_all_data_blocks(block_list, prm['demodnum'])
-    dset_p = _convert_to_polar_coordinates(dset)
-    dset_p = _add_amplitude_and_phase_correction(dset_p)
-    dset_rect = _convert_to_rectangular_coordinates(dset_p)
+    dset_rect = apply_amplitude_and_phase_correction(
+        dset, 
+        prm,
+        deviation=deviation,
+        phase_lag=phase_lag,
+        ampliude_lag=amplitude_lag
+    )
     return dset_rect
     
+def apply_amplitude_and_phase_correction(dset, prm, deviation=None, phase_lag=None, 
+                         amplitude_lag=None):
+    """ """
+    dset_p = _convert_to_polar_coordinates(dset)
+    dset_p, deviation, phase_lag, amplitude_lag = _add_amplitude_and_phase_correction(
+        dset_p, 
+        deviation=deviation,
+        phase_lag=phase_lag,
+        amplitude_lag=amplitude_lag
+    )
+    dset_rect = _convert_to_rectangular_coordinates(dset_p)
+    return dset_rect    
+    
+
 def get_energy_spectra(dset, prm):
     """ """
     t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
@@ -1177,7 +1213,8 @@ def _check_resize_cond(resize_cond, prm, e_res):
 
 
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
-                             pixel_number=None, zsweep_nr=40, missing_pxls=None, 
+                             pixel_number=None, zsweep_nr=40, missing_pxls=None,
+                             deviation=None, phase_lag=None, amplitude_lag=None,
                              verbose=False):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
@@ -1211,6 +1248,14 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
             parameter.
         missing_pxl_idx | int
             index at which the dummy data blocks will be inserted
+        deviation | float
+            constant offset applied to the phase lag values
+        phase_lag | 1d np.array
+            phase lags values for every higher harmonic. Length has to match 
+            the FFT-coefficient length in ``dset_p``.
+        amplitude_lag | 1d np.array
+            ampltiude lag values for every higher harmonic. Length has to match
+            the FFT-coefficient length in ``dset_p``.
         verbose | bool
             specifies if conversion progress should be plotted to the console
     
@@ -1246,6 +1291,18 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     
     """
     e_res = 0.005
+    
+    
+    # ========================
+    # set amplitude and phase lag
+    # ========================    
+    if deviation is None:
+        deviation = DEVIATION
+    if phase_lag is None:
+        phase_lag = PHASE_LAG
+    if amplitude_lag is None:
+        amplitude_lag = AMPLITUDE_LAG
+
     
     # ========================
     # load measurement parameter
@@ -1331,7 +1388,13 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
 
 
     for idx, sub_block in enumerate(data_block_parcels):
-        arr = get_measurement_data(sub_block, prm)
+        arr = get_measurement_data(
+            sub_block, 
+            prm,
+            deviation=deviation,
+            phase_lag=phase_lag,
+            amplitude_lag=amplitude_lag
+        )
         dset[idx*n:(idx+1)*n] = arr
         
         print('dset - converted {0:d}/{1:d}'.format(idx, n_parcels))
@@ -1370,6 +1433,25 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     # ========================
     for k,v in prm.items():
         dset.attrs[k] = v
+        
+    # ========================
+    # store amplitude- and phase lag calibration values
+    # ========================
+    mla_calibration = {
+        'amplitude_lag': amplitude_lag,
+        'phase_lag':     phase_lag,
+        'deviation':     deviation
+    }
+    
+    mla_calib = f.create_dataset(
+        'mla_calibration', 
+        resize_cond,
+        dtype=np.float
+    )
+    for k,v in mla_calibration.items():
+        mla_calib.attrs[k] = v
+    
+    
 
 
     # ========================
@@ -1500,7 +1582,7 @@ if __name__ == "__main__":
     # prm = _parse_mla_data_header(block_list)
     # dset = _parse_all_data_blocks(block_list, prm['demodnum'])
     # dset_p = _convert_to_polar_coordinates(dset)
-    # dset_p = _add_amplitude_and_phase_correction(dset_p)
+    # dset_p, deviation, phase_lag, amplitude_lag = _add_amplitude_and_phase_correction(dset_p)
     # dset_rect = _convert_to_rectangular_coordinates(dset_p)
     # t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
     

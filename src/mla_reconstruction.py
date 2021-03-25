@@ -939,7 +939,7 @@ def get_measurement_data(block_list, prm, deviation=None, phase_lag=None,
         prm,
         deviation=deviation,
         phase_lag=phase_lag,
-        ampliude_lag=amplitude_lag
+        amplitude_lag=amplitude_lag
     )
     return dset_rect
     
@@ -1215,7 +1215,7 @@ def _check_resize_cond(resize_cond, prm, e_res):
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
                              pixel_number=None, zsweep_nr=40, missing_pxls=None,
                              deviation=None, phase_lag=None, amplitude_lag=None,
-                             verbose=False):
+                             mode='a', verbose=False):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
     
@@ -1256,6 +1256,9 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         amplitude_lag | 1d np.array
             ampltiude lag values for every higher harmonic. Length has to match
             the FFT-coefficient length in ``dset_p``.
+        mode | str
+            single characcter which specifies mode in which the HDF5 file is 
+            opened in. Check the ``open(..)`` documentation for details.
         verbose | bool
             specifies if conversion progress should be plotted to the console
     
@@ -1330,7 +1333,7 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     # create hdf5 data structure
     # ========================
     mla_hdf5_fn = mla_data_fn.replace('.txt', '.hdf5')
-    f = h5py.File(mla_hdf5_fn, 'a')
+    f = h5py.File(mla_hdf5_fn, mode=mode)
     
     dset = f.create_dataset(
         'dset', 

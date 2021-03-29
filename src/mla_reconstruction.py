@@ -8,7 +8,7 @@ Created on Wed Mar 10 14:15:39 2021
 
 
 __author__ = "kha"
-__version__ = "0.0.2"
+__version__ = "1.0.0"
 
 
 import os 
@@ -901,8 +901,8 @@ def get_linearized_energy(prm, e_res=0.005):
             contains the measurement parameter present in the datafile header
             block. Can be generated with the ``_parse_mla_data_header(..)``.
         e_res | float
-            energy resolution -- given in volts -- specifies the spacing 
-            between subsequent values in the returned linearized energy np.array
+            energy resolution (in volts) specifies the spacing between 
+            subsequent values in the returned linearized energy np.array
             
     Returns
     -------
@@ -910,6 +910,19 @@ def get_linearized_energy(prm, e_res=0.005):
             linearized energy values calculated from the MLA modulation 
             amplitude and offset.
             
+            
+    Example
+    -------
+        For this example to work the ``pixel_number`` of the used MLA dataset
+        ``mla_data.txt`` must be known and past to the 
+        ``_load_mla_data_header(..)`` function.
+        
+        >>> mla_fn = 'mla_data.txt'
+        >>> prm = _load_mla_data_header(
+        ...    mla_fn, 
+        ...    pixel_number=pixel_number
+        ... )
+        >>> lin_en = get_linearized_energy(prm)
             
     """
 #    e_min = prm['offset'] - prm['modamp'] + e_res/2
@@ -1332,9 +1345,6 @@ def _read_one_block(f, data_block_delimiter=None):
         block_lines.append(s_)
         s_ = f.readline()
     return block_lines
-
-    
-    
 
 
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 

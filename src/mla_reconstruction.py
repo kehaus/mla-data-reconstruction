@@ -1145,6 +1145,57 @@ def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
 # data processing -- zero-pad missing trigger
 # ===========================================================================
 
+def compile_missing_pixel_list(missing_locations, n_z=40):
+    """returns missing_pxls list compiled from a missing_locations list.
+    
+    The missing_pxls list contians the index of the missing measurement pixels
+    for every height value for all the provided measurement locations The
+    missing_locations dictionary contains only the the list of missing 
+    measurement locations. 
+    
+    Paramter
+    --------
+        missing_locations | list of integer
+            contains index of missed grid locations in the to-be-reconstructed MLA
+            dataset. Attention, keep in mind the difference between **locations
+            indices** and **pixel indices** when wokring with this list.
+        n_z | int
+            number of MLA measurements at every grid location. Normally this
+            refers to the different heights which are measured per grid 
+            location.
+            
+    Returns
+    -------
+        missing_pxls | list of integer
+            specifies the missing MLA measurement point. Attention, keep in 
+            mind the difference between **locations indices** and **pixel 
+            indices** when wokring with this list.
+    
+    
+    Example:
+    --------
+    A grid-MLA with 40 height values measured at every
+    measurement location on a 20x20 (= nrows x ncols) grid misses a pixel at 
+    the grid location  14x5 (=row_idx=14; col_idx=5) would use:
+        
+    >>> 
+    >>> nrows= 20; ncols=20; n_z = 40
+    >>> idx_row = 14-1; idx_col = 5-1
+    >>> missing_locations = [
+    ...     nrows*idx_row + idx_col
+    ... ]
+    >>> missing_pxls = compile_missing_pixel_list(
+    ...     missing_locations, n_z=n_z
+    ... )
+    
+    
+    """
+    missing_pxls = []
+    
+    for loc_idx in missing_locations:
+        missing_pxls += list(range(loc_idx*n_z,(loc_idx+1)*n_z))
+    return missing_pxls
+
 
 def _zeropad_missing_pxl(data_block_list, missing_pxl_idx, zsweep_nr,
                              prm):
@@ -1412,8 +1463,8 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         >>> mla_txt_fn = '2021-03-15_TSP-MLA-zsweep_5x5nm_25x25pxl/Measurement of 2021-03-15 2005.txt'
         >>> mla_hdf5_fn = _load_mla_data_into_hdf5(
         ...     mla_txt_fn,
-        ...     resize_curr = (40,25,25,625),
-        ...     resize_cond = (40,25,25,322)
+        ...     resize_curr = (25,25,40,119),    # (nrows, ncols, n_z. n_e)
+        ...     resize_cond = (25,25,40,119)     # (nrows, ncols, n_z. n_e)
         ... )
     
         Load the current and conductance data from the HDF5 file back into 

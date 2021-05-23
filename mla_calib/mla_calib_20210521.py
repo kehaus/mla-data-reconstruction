@@ -28,14 +28,6 @@ def load_calib_data(txt_fn):
 
 
 # ===========================================================================
-# Load measured amplitude and phase values 
-# ===========================================================================
-txt_fn = 'mla_calib_20210521.csv'
-
-f, amplitude_meas, phase_meas = load_calib_data(txt_fn)
-
-
-# ===========================================================================
 # lag-calculation function
 # ===========================================================================
 
@@ -55,6 +47,14 @@ def calculate_amplitude_lag(amplitude_meas):
     amplitude_lag = amp_rescaled / amp_base_tone
     
     return amplitude_lag
+
+
+# ===========================================================================
+# Load measured amplitude and phase values 
+# ===========================================================================
+# txt_fn = 'mla_calib_20210521.csv'
+# f, amplitude_meas, phase_meas = load_calib_data(txt_fn)
+
 
 
 

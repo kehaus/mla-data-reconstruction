@@ -763,7 +763,8 @@ def _get_excitation_voltage_signal(t, prm):
     return prm['offset'] + prm['modamp'] * np.cos(2 * np.pi * t)
 
 def reconstruct_energy_spectra(
-        dset, prm, t, v_t, first_index, last_index, step_size, use_trace='bwd'
+        dset, prm, t, v_t, first_index, last_index, step_size, use_trace='bwd',
+        e_res=0.005
     ):
     """returns the reconstructed current, conductance data with the corresponding
     energy values.
@@ -796,6 +797,10 @@ def reconstruct_energy_spectra(
             to construct the ``curr`` and ``cond`` matrices. Valid values are
             ``fwd``: use the forward trace; ``bwd``: use the backward trace; 
             or ``both``: use the average of fwd and bwd trace.
+        e_res | float
+            energy resolution (in volts) specifies the spacing between 
+            subsequent values in the returned linearized energy np.array
+
 
     Returns
     -------
@@ -829,7 +834,7 @@ def reconstruct_energy_spectra(
     
     """
     
-    e_res = 0.005   # [V]
+#    e_res = 0.005   # [V]
     linearizedEnergy = get_linearized_energy(prm, e_res=e_res)
     e_nr = len(linearizedEnergy)
     
@@ -1043,19 +1048,20 @@ def apply_amplitude_and_phase_correction(dset, prm, deviation=None, phase_lag=No
     return dset_rect    
     
 
-def get_energy_spectra(dset, prm):
+def get_energy_spectra(dset, prm, e_res=0.005):
     """ """
     t, v_t, first_index, last_index, step_size = _setup_reconstruction_parameter(**prm)
 
     linearizedEnergy, linarr, arr = reconstruct_energy_spectra(
         dset, prm,
         t, v_t, first_index, last_index, step_size,
+        e_res=e_res
     )
     return linearizedEnergy, linarr, arr
     
     
     
-def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
+def generate_energy_spectra(mla_data_fn, n=1000, e_res=0.005, verbose=True):
     """loades, processes, and saves MLA energyspectra blockwise to text file.
     
     Function loads FFT coefficients from MLA measurement file, calculates
@@ -1070,6 +1076,9 @@ def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
         n | int
             number of blocks into which the MLA data will be parsed for block-
             processing
+        e_res | float
+            energy resolution (in volts) specifies the spacing between 
+            subsequent values in the returned linearized energy np.array
         verbose | bool
             flag to printout energy-spectra generation progress
     
@@ -1115,7 +1124,7 @@ def generate_energy_spectra(mla_data_fn, n=1000, verbose=True):
         # load data parcel and compute energy spectra
         # ====================
         dset = get_measurement_data(sub_block, prm)
-        linE, linarr, arr = get_energy_spectra(dset, prm)
+        linE, linarr, arr = get_energy_spectra(dset, prm, e_res=e_res)
         
         # ===================
         # save spectra to file
@@ -1589,7 +1598,8 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         
             linE, cond_arr, curr_arr = get_energy_spectra(
                 arr_,
-                prm
+                prm,
+                e_res=e_res
             )
             
             curr[curr_idcs[idx]] = curr_arr

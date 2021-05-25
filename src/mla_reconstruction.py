@@ -142,7 +142,7 @@ def _create_block_list(lines):
     """returns the mla data as nested list where one list element represents 
     one block of data
     
-    Function parses the provided list of lines and groups them into blocks and 
+    Function parses the provided list of lines, groups them into blocks and 
     returns them as a list of blocks. The first list element is the header 
     block. The following blocks are data blocks where one block corresponds
     to a recorded spectrum.
@@ -187,6 +187,10 @@ def _parse_mla_data_header(block_list, pixel_number=None):
             List where every element corresponds to a block (header, data, ...).
             One block (i.e. element) consists of a list of lines belonging
             to that block of data.
+        pixel_number | int
+            specifies the number of measurement blocks present in the mla data
+            file. This parameter can be omitted if the specified ``block_list``
+            contains all the measured data blocks.
             
     Returns
     -------
@@ -499,7 +503,7 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
     -------
         >>> lines = _load_mla_data(mla_data_fn)
         >>> block_list = _create_block_list(lines)
-        >>> prm = _parse_mla_data_header(block_list[0])
+        >>> prm = _parse_mla_data_header(block_list)
         >>> dset = _parse_all_data_blocks(block_list, prm['demodnum'])
     
         to select the FFT coefficents for a given spectrum
@@ -537,12 +541,14 @@ def _delete_last_fft_tone(dset):
 
 
 def _convert_to_polar_coordinates(dset):
-    """converts the complex values in the given 2d-array into polar coordinate 
+    """convert the complex values in the given 2d-array into polar coordinate 
     representation
     
-    This function ads an third axis to the given dset array to store the 
-    computed radial coordinate values as dset[:,:,0] and the angular coordinate
-    values as dset[:,:,1].
+    For conversion the ``cmath.polar`` function is used. The return angular
+    values are given in radiant.
+    This function adds a third axis to the given dset array to store the 
+    computed radial coordinate values as ``dset[:,:,0]`` and the angular 
+    coordinate values as ``dset[:,:,1]`` .
     
     Parameter
     ---------
@@ -564,7 +570,7 @@ def _convert_to_polar_coordinates(dset):
         
         >>> lines = _load_mla_data('mla_data.txt')
         >>> block_list = _create_block_list(lines)
-        >>> prm = _parse_mla_data_header(block_list[0])
+        >>> prm = _parse_mla_data_header(block_list)
         >>> dset = _parse_all_data_blocks(block_list, prm['demodnum'])
         
         convert complex-valued ``dset`` to polar coordinates
@@ -603,10 +609,13 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None,
     
     This function applies the predefined ``amplitude_lag`` and ``phase_lag``
     values as correction onto the provided FFT coefficient matrix.
-    It is important that the given ``dset_p`` is provided in polar coordinates.
+    It is important that 
+        * ``dset_p`` is provided in **polar coordinates** and 
+        * the ``phase_lag`` are provided in **degrees**.
+    
     If no values for ``deviation``, ``phase_lag``, and ``amplitude_lag`` are 
-    provided default parameter will be used (i.e. ``DEVIATIOM``, ``PHASE_LAG``, 
-    and ``AMPLITUDE_LAG``).
+    provided default parameter will be used (see ``DEVIATIOM``, ``PHASE_LAG``, 
+    and ``AMPLITUDE_LAG`` variables defined in this file).
     
     
     Parameter
@@ -663,7 +672,11 @@ def _add_amplitude_and_phase_correction(dset_p, deviation=None, phase_lag=None,
     
 def _convert_to_rectangular_coordinates(dset_p):
     """converts the given array from polar to cartesian coordinates (i.e. complex
-    value representation
+    value representation).
+    
+    Function uses ``cmath.rect`` to convert from polar coordinates to
+    rectangular coordinates. It is important that the angular input valur is 
+    given in **radiant**.
     
     Parameter
     ---------
@@ -778,7 +791,7 @@ def reconstruct_energy_spectra(
     ---------
         dset | 2d np.array
             FFT coefficient matrix from a MLA measurement. Coefficient are 
-            stored complex values (i.e. cartesian representation).           
+            stored as complex values (i.e. cartesian representation).           
         prm | dict
             contains the measurement parameter present in the datafile header
             block. Can be generated with the ``_parse_mla_data_header(..)``.
@@ -847,34 +860,49 @@ def reconstruct_energy_spectra(
         # ======
         # reconstruct current from FFT coefficients
         # ======
-        fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
-        fft_coeff_vec[first_index:last_index + step_size: step_size] = row
-        recon_pixels = np.fft.ifft(fft_coeff_vec)
-        recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
+        # fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
+        # fft_coeff_vec[first_index:last_index + step_size: step_size] = row
+        # recon_pixels = np.fft.ifft(fft_coeff_vec)
+        # recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
+
 #        curr[idx, :] = recon_pixels_amp
+
+        recon_pixels_amp = _reconstruct_current_from_fft_coefficients(
+            row,
+            prm,
+            first_index,
+            last_index,
+            step_size
+        )
         
         # ======
-        # create interpolated values for the conductance computation
+        # create currrent interpolation function
         # ======
-        if use_trace == 'fwd':
-            f = interpolate.interp1d(
-                v_t[:prm['nsamples']//2], 
-                recon_pixels_amp[:prm['nsamples']//2]
-            )
-        elif use_trace == 'bwd':
-            f = interpolate.interp1d(
-                v_t[prm['nsamples']//2:], 
-                recon_pixels_amp[prm['nsamples']//2:]
-            )
-        elif use_trace == 'both':
-            f = interpolate.interp1d(
-                v_t, 
-                recon_pixels_amp
-            )
-        else: 
-            raise ValueError(
-                "Given use_trace: {} is not valid!".format(use_trace)
-            )
+        # if use_trace == 'fwd':
+        #     f = interpolate.interp1d(
+        #         v_t[:prm['nsamples']//2], 
+        #         recon_pixels_amp[:prm['nsamples']//2]
+        #     )
+        # elif use_trace == 'bwd':
+        #     f = interpolate.interp1d(
+        #         v_t[prm['nsamples']//2:], 
+        #         recon_pixels_amp[prm['nsamples']//2:]
+        #     )
+        # elif use_trace == 'both':
+        #     f = interpolate.interp1d(
+        #         v_t, 
+        #         recon_pixels_amp
+        #     )
+        # else: 
+        #     raise ValueError(
+        #         "Given use_trace: {} is not valid!".format(use_trace)
+        #     )
+        f = _calc_current_interpolation(
+            recon_pixels_amp, 
+            prm, 
+            v_t, 
+            use_trace=use_trace
+        )
         
         # ====
         # fillin curren values
@@ -884,16 +912,138 @@ def reconstruct_energy_spectra(
         # ====
         # fillin conductance values
         # ====
-        dE = np.diff(linearizedEnergy)[0]
-        lin_en_ = np.concatenate([
-            linearizedEnergy-dE/2, [linearizedEnergy[-1]+dE/2]
-        ])
-        cond[idx, :] = np.diff(f(lin_en_))
+        # dE = np.diff(linearizedEnergy)[0]
+        # lin_en_ = np.concatenate([
+        #     linearizedEnergy-dE/2, [linearizedEnergy[-1]+dE/2]
+        # ])
+        # cond_row = np.diff(f(lin_en_))
         
+        cond_row = _calc_conductance_from_current(f, linearizedEnergy)
+        cond[idx, :] = cond_row
         
-#    cond = np.diff(curr)
-    
     return linearizedEnergy, cond, curr
+
+def _reconstruct_current_from_fft_coefficients(dset_row, prm, first_index, 
+                                               last_index, step_size):
+    """returns the  real-valued current trace reconstructed from the FFT
+    coefficents in dset_row
+    
+    Parameter
+    ---------
+        dset_row | 1d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).           
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+        first_index | int
+            index of the first harmonics (i.e. base tone)
+        last_index | int
+            index of the last harmonics
+        step_size | float
+            difference between two subsequent tones in parts of ``df``.
+    
+    Returns
+    -------
+        recon_pixels_amp | 2d np.array
+            ampltiude values of the reconstracted curren trace. 
+    
+    """
+    fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
+    fft_coeff_vec[first_index:last_index + step_size: step_size] = dset_row
+    recon_pixels = np.fft.ifft(fft_coeff_vec)
+    recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
+    return recon_pixels_amp
+
+def _calc_current_interpolation(recon_pixels_amp, prm, v_t, use_trace='bwd',
+                                **kwargs):
+    """returns the interpolated current trace as callable function.
+    
+    Interpolation is done using the ``scipy.interpolate.interp1d`` function.
+    
+    
+    Paramter
+    --------
+        recon_pixels_amp | 2d np.array
+            ampltiude values of the reconstracted curren trace. 
+        prm | dict
+            contains the measurement parameter present in the datafile header
+            block. Can be generated with the ``_parse_mla_data_header(..)``.
+        v_t | 1d np.array
+            vector of Volt values for one excitation period
+        use_trace | (``fwd`` | ``bwd`` | ``both``)
+            indicates which part of the reconstructed spectrum will be used
+            to construct the ``curr`` and ``cond`` matrices. Valid values are
+            ``fwd``: use the forward trace; ``bwd``: use the backward trace; 
+            or ``both``: use the average of fwd and bwd trace.
+        kwargs |
+            are passed to ``scipy.interpolate.interp1d``.
+
+    Returns
+    -------
+        f | scipy.interpolate.interp1d
+            interpolated current trace is returned as callable obbject
+            
+    Example
+    -------
+            
+    
+    """
+    if use_trace == 'fwd':
+        f = interpolate.interp1d(
+            v_t[:prm['nsamples']//2], 
+            recon_pixels_amp[:prm['nsamples']//2],
+            **kwargs
+        )
+    elif use_trace == 'bwd':
+        f = interpolate.interp1d(
+            v_t[prm['nsamples']//2:], 
+            recon_pixels_amp[prm['nsamples']//2:],
+            **kwargs
+        )
+    elif use_trace == 'both':
+        f = interpolate.interp1d(
+            v_t, 
+            recon_pixels_amp,
+            kwargs
+        )
+    else: 
+        raise ValueError(
+            "Given use_trace: {} is not valid!".format(use_trace)
+        )
+    return f
+        
+def _calc_conductance_from_current(interp_curr, linearizedEnergy):
+    """returns conductance values calculated from the provided interpolated 
+    current function and the given linearized energy values
+    
+    Parameter
+    ---------
+        interp_curr | scipy.interpolate.interp1d
+            interpolated current trace is returned as callable obbject
+        linearizedEnergy | 1d np.array
+            represents the energy values for which the condutance values are 
+            calculated
+    
+    Returns
+    -------
+        cond_row | 1d np.array
+            reconstructed conductance values calculated from the given current 
+            at the specified energy values
+    
+    """
+    dE = np.diff(linearizedEnergy)[0]
+    lin_en_ = np.concatenate([
+        linearizedEnergy-dE/2, [linearizedEnergy[-1]+dE/2]
+    ])
+    cond_row = np.diff(
+        interp_curr(lin_en_)
+    )
+    return cond_row
+    
+    
+    
+    
 
 
 def get_linearized_energy(prm, e_res=0.005):
@@ -933,7 +1083,6 @@ def get_linearized_energy(prm, e_res=0.005):
 #    e_min = prm['offset'] - prm['modamp'] + e_res/2
     e_min = prm['offset'] - prm['modamp'] + e_res
     e_max = e_max = prm['offset'] + prm['modamp']
-    
     return np.arange(e_min, e_max, e_res)
     
     
@@ -1410,7 +1559,8 @@ def _read_one_block(f, data_block_delimiter=None):
 def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False, 
                              pixel_number=None, zsweep_nr=40, missing_pxls=None,
                              deviation=None, phase_lag=None, amplitude_lag=None,
-                             mode='a', e_res=0.005, verbose=False):
+                             mode='a', e_res=0.005, mla_hdf5_fn=None, 
+                             verbose=True):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
     
@@ -1456,6 +1606,10 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
             opened in. Check the ``open(..)`` documentation for details.
         e_res | float
             energy resolution used to generate the linearized-energy vector.
+        mla_hdf5_fn | str
+            defines the filename of the generated HDF5 file. Default value is 
+            the same name as the provided txt file with the file ending changed 
+            to .hdf5
         verbose | bool
             specifies if conversion progress should be plotted to the console
     
@@ -1530,7 +1684,8 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     # ========================
     # create hdf5 data structure
     # ========================
-    mla_hdf5_fn = mla_data_fn.replace('.txt', '.hdf5')
+    if mla_hdf5_fn is None:
+        mla_hdf5_fn = mla_data_fn.replace('.txt', '.hdf5')
     f = h5py.File(mla_hdf5_fn, mode=mode)
     
     dset = f.create_dataset(
@@ -1565,8 +1720,9 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     )
 
     for idx in range(prm['pixelNumber']):
-        if idx%10 == 0:
-            print('Processed {0:d}/{1:d}'.format(idx, prm['pixelNumber']))
+        if verbose:
+            if idx%10 == 0:
+                print('Processed {0:d}/{1:d}'.format(idx, prm['pixelNumber']))
         
         # ====================
         # read one data block
@@ -1646,9 +1802,10 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     f.close()
     f_txt.close()
     
-    print('data are successfully converted to the hdff file: {}'.format(
-        mla_hdf5_fn
-    ))
+    if verbose:
+        print('data are successfully converted to the hdff file: {}'.format(
+            mla_hdf5_fn
+        ))
     
     return mla_hdf5_fn
 

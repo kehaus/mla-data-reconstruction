@@ -132,4 +132,4 @@ dmypy.json
 # ================
 # exclude reconstructed data
 # ================
-.*hdf5
+*.hdf5

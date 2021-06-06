@@ -1507,7 +1507,7 @@ def _check_resize_cond(resize_cond, prm, e_res):
 
 
 def _read_one_block(f, data_block_delimiter=None):
-    """reads and returns one data block from the given file hander f
+    """reads and returns one data block from the given file handle f
     
     Function calls ``readline()`` on the given file handle ``f`` until an 
     a ``data_block_limiter`` is read.
@@ -1720,6 +1720,10 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     )
 
     for idx in range(prm['pixelNumber']):
+
+        # ====================
+        # print progress
+        # ====================
         if verbose:
             if idx%10 == 0:
                 print('Processed {0:d}/{1:d}'.format(idx, prm['pixelNumber']))

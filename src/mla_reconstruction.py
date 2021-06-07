@@ -465,8 +465,17 @@ def _parse_data_block(data_block):
     
     
     """
+    data_block_body = []
+    for line in data_block:
+        if 'Part' in line or '# of trigger:' in line:   # ignore header line
+            pass
+        elif 'Dc Value:' in line:                       # parse dc-value
+            dc_value = _parse_dc_value_from_line(line)
+        else:                                           # read data line
+            data_block_body.append(line)
+    
     vals = np.array(
-        [l.replace('\n','').split('\t') for l in data_block[2:]], 
+        [l.replace('\n','').split('\t') for l in data_block_body], 
         dtype=np.float
     )
     data = np.dot(vals, [1, 1j])
@@ -526,6 +535,36 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
         dset = _delete_last_fft_tone(dset)
     return dset
 
+
+def _parse_dc_value_from_line(line, dc_value_identifier= None):
+    """parses the dc value from the given line 
+    
+    Parameter
+    ---------
+        line | str
+            one line parsed from the mla data file containing the dc value 
+        
+    Returns
+    -------
+        dc_value | float
+            parsed dc value
+        
+    Example:
+        >>> dc_value_identifier = 'Dc Value:'
+        >>> line = 'Dc Value: 2.834523'
+        >>> dv_value = _parse_dc_value_from_line(
+        ...     line,
+        ...     dc_value_identifier
+        .. )
+        
+        
+    """
+    DC_VALUE_IDENTIFIER = 'Dc Value:'
+    
+    if dc_value_identifier == None:
+        dc_value_identifier = DC_VALUE_IDENTIFIER
+        
+    return float(line.replace(dc_value_identifier,''))
     
 # ===========================================================================
 # data processing -- add phase and amplitude lag
@@ -860,13 +899,6 @@ def reconstruct_energy_spectra(
         # ======
         # reconstruct current from FFT coefficients
         # ======
-        # fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
-        # fft_coeff_vec[first_index:last_index + step_size: step_size] = row
-        # recon_pixels = np.fft.ifft(fft_coeff_vec)
-        # recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
-
-#        curr[idx, :] = recon_pixels_amp
-
         recon_pixels_amp = _reconstruct_current_from_fft_coefficients(
             row,
             prm,
@@ -878,25 +910,6 @@ def reconstruct_energy_spectra(
         # ======
         # create currrent interpolation function
         # ======
-        # if use_trace == 'fwd':
-        #     f = interpolate.interp1d(
-        #         v_t[:prm['nsamples']//2], 
-        #         recon_pixels_amp[:prm['nsamples']//2]
-        #     )
-        # elif use_trace == 'bwd':
-        #     f = interpolate.interp1d(
-        #         v_t[prm['nsamples']//2:], 
-        #         recon_pixels_amp[prm['nsamples']//2:]
-        #     )
-        # elif use_trace == 'both':
-        #     f = interpolate.interp1d(
-        #         v_t, 
-        #         recon_pixels_amp
-        #     )
-        # else: 
-        #     raise ValueError(
-        #         "Given use_trace: {} is not valid!".format(use_trace)
-        #     )
         f = _calc_current_interpolation(
             recon_pixels_amp, 
             prm, 
@@ -925,8 +938,12 @@ def reconstruct_energy_spectra(
 
 def _reconstruct_current_from_fft_coefficients(dset_row, prm, first_index, 
                                                last_index, step_size):
-    """returns the  real-valued current trace reconstructed from the FFT
+    """returns the real-valued current trace reconstructed from the FFT
     coefficents in dset_row
+    
+    To take dv-calue into account, function compares the dset_row and 
+    first_index/last_index values. if they match no dc-value is present; if 
+    they mismatch by one, the first_index is shifted.
     
     Parameter
     ---------
@@ -950,6 +967,17 @@ def _reconstruct_current_from_fft_coefficients(dset_row, prm, first_index,
     
     """
     fft_coeff_vec = np.zeros(prm['nsamples'], dtype=np.complex)
+    
+    # n_val = last_index+step_size - first_index
+    # if n_val == list(dset_row.shape)[-1]:
+    #     pass
+    # if n_val == list(dset_row.shape)[-1]-1:
+    #     first_index += -1
+    # else:
+    #     raise ValueError(
+    #         'first_index, last_index values do not match dset_rect size'
+    #     )
+    
     fft_coeff_vec[first_index:last_index + step_size: step_size] = dset_row
     recon_pixels = np.fft.ifft(fft_coeff_vec)
     recon_pixels_amp = 2 * np.real(recon_pixels) * 1e3
@@ -1542,17 +1570,30 @@ def _read_one_block(f, data_block_delimiter=None):
             
     
     """
+    DC_VALUE_IDENTIFIER = 'Dc Value:'
+    
     if data_block_delimiter == None:
         data_block_delimiter = DATA_BLOCK_DELIMITER
     
     if f.closed:
         raise MLAReconstructionException('Given file hanlder is not open.')
     
+    dc_value_line = None
     block_lines = []
     s_ = f.readline()
     while not s_ in DATA_BLOCK_DELIMITER:
-        block_lines.append(s_)
+        if DC_VALUE_IDENTIFIER in s_:
+            dc_value_line = s_
+            f.readline()
+            print(dc_value_line)
+        else:
+            block_lines.append(s_)
         s_ = f.readline()
+        
+    # insert dc value as second line 
+    if dc_value_line != None:
+        block_lines = block_lines[0:1] + [dc_value_line] + block_lines[1:]
+    
     return block_lines
 
 
@@ -1686,6 +1727,9 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
     # ========================
     if mla_hdf5_fn is None:
         mla_hdf5_fn = mla_data_fn.replace('.txt', '.hdf5')
+        
+    if os.path.exists(mla_hdf5_fn):
+        os.remove(mla_hdf5_fn)
     f = h5py.File(mla_hdf5_fn, mode=mode)
     
     dset = f.create_dataset(

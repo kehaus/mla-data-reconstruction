@@ -67,7 +67,6 @@ fn_txt2 = os.path.join(
 # ### =========================================================================
 # from mla_reconstruction import _load_mla_data, _create_block_list, _parse_mla_data_header
 
-
 # lines = _load_mla_data(fn_txt)
 # block_list = _create_block_list(lines)
 # hd_prm = _parse_mla_data_header(block_list)
@@ -90,6 +89,24 @@ fn_h5 = _load_mla_data_into_hdf5(
     mode='w',
     # missing_pxls=[10,60,135]
 )
+
+
+### =========================================================================
+#%% test txt to hdf5 conversion -- Non offset
+### =========================================================================
+from mla_reconstruction import _load_mla_data_into_hdf5
+
+# ==== Test case 2: load and reshape with dc value
+fn_h5 = _load_mla_data_into_hdf5(
+    fn_txt2,
+    resize_curr=(5,5,5,159),
+    resize_cond=(5,5,5,159),
+    pixel_number=125,
+    zsweep_nr=5,
+    mode='w',
+    # missing_pxls=[10,60,135]
+)
+
 
 
 

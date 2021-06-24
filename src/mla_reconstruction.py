@@ -453,10 +453,13 @@ def _parse_data_block(data_block):
     ------
         1d np.array
             complex-valued FFT coefficient from one MLA spectrum (i.e. data block)
-    
+        dc_value | float (optional)
+            MLA data block dc_value pixel. only returned if it is present in 
+            the parsed datablock
+            
     Example
     -------
-        reconstruct one specta
+        reconstruct one specta (without dc-value)
         
         >>> lines = _load_mla_data(mla_data_fn)
         >>> block_list = _create_block_list(lines)
@@ -466,6 +469,7 @@ def _parse_data_block(data_block):
     
     """
     data_block_body = []
+    dc_value = None
     for line in data_block:
         if 'Part' in line or '# of trigger:' in line:   # ignore header line
             pass
@@ -479,7 +483,11 @@ def _parse_data_block(data_block):
         dtype=np.float
     )
     data = np.dot(vals, [1, 1j])
-    return data
+    
+    if dc_value == None:    # normal caes
+        return data
+    else:                   # dc-value case
+        return data, dc_value      
 
 def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=True):
     """returns a 2d-array of FFT coefficients from one MLA dataset
@@ -527,13 +535,28 @@ def _parse_all_data_blocks(block_list, demodnum, remove_compensation_channel=Tru
     
     # parse data from txt to np.array 
     dset = np.empty((len(data_block_list), demodnum), dtype=np.complex)
+    dc_value = None
     for idx,data_block in enumerate(data_block_list):
-        dset[idx,:] = _parse_data_block(data_block)
+        rtrn = _parse_data_block(data_block)
+        if type(rtrn) != tuple:          # normal case -- one return arg
+            dset[idx,:] = rtrn
+        else:                            # dc value case -- multiple return args
+            if len(rtrn) == 2:
+                dset[idx,:], dc_value = rtrn
+            else:
+                raise MLAReconstructionException(
+                    'Data block parsing failed. More than two return values provided.'
+                )
         
     # remove compensation channel from dset
     if remove_compensation_channel:
         dset = _delete_last_fft_tone(dset)
-    return dset
+
+    # case handling if dc_value is present
+    if dc_value != None:
+        return dset, dc_value
+    else:
+        return dset
 
 
 def _parse_dc_value_from_line(line, dc_value_identifier= None):
@@ -814,6 +837,63 @@ def _get_excitation_voltage_signal(t, prm):
     """ """
     return prm['offset'] + prm['modamp'] * np.cos(2 * np.pi * t)
 
+def _adjust_reconstruction_idcs_to_dc_value(dset_row, first_index, last_index, 
+                                            step_size, verbose=False):
+    """reduces first_indexby one  if dc_value is present in given fft coeff row.
+    
+    Doesn't change first_index if dc_value is not present. Presence of dc_value
+    is determined by comparing the length of dset_row and the values of 
+    first_index, last_index, and step_size.
+    
+    Parameter
+    ---------
+        dset_row | 1d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).           
+        first_index | int
+            index of the first harmonics (i.e. base tone)
+        last_index | int
+            index of the last harmonics
+        step_size | float
+            difference between two subsequent tones in parts of ``df``.
+
+    Returns
+    ---------
+        first_index | int
+            adjusted index of the first harmonics (i.e. base tone)
+        last_index | int
+            index of the last harmonics
+        step_size | float
+            difference between two subsequent tones in parts of ``df``.
+
+    
+    """
+    row_len = dset_row.size
+    idx_width = last_index + step_size - first_index
+    
+    if idx_width == row_len:
+        pass
+    elif idx_width+1 == row_len:
+        first_index -= 1
+        if verbose:
+            print(
+                'dc-value detected. shifted first_index by -1 to be {0:d}.'.format(first_index)
+            )
+    else:
+        raise MLAReconstructionException(
+            'Given row length does not match specified first_index and last_index !',
+            '\n row length: {0:d}; first_index: {1:d}, last_index: {2:d}'.format(
+                row_len, first_index, last_index    
+            )
+        )
+    
+    if verbose:
+        print('row length: ', row_len)
+        print('idcs:       ', idx_width)
+    return first_index, last_index
+
+
+
 def reconstruct_energy_spectra(
         dset, prm, t, v_t, first_index, last_index, step_size, use_trace='bwd',
         e_res=0.005
@@ -896,6 +976,15 @@ def reconstruct_energy_spectra(
     
     for idx, row in enumerate(dset):
         
+        # ======
+        # FEATURE: DC-VALUE
+        # ======
+        first_index, las_index = _adjust_reconstruction_idcs_to_dc_value(
+            row,
+            first_index,
+            last_index,
+            step_size
+        )
         # ======
         # reconstruct current from FFT coefficients
         # ======
@@ -1033,7 +1122,7 @@ def _calc_current_interpolation(recon_pixels_amp, prm, v_t, use_trace='bwd',
         f = interpolate.interp1d(
             v_t, 
             recon_pixels_amp,
-            kwargs
+            **kwargs
         )
     else: 
         raise ValueError(
@@ -1157,11 +1246,18 @@ def get_linearized_energy(prm, e_res=0.005):
     
 
 def get_measurement_data(block_list, prm, deviation=None, phase_lag=None, 
-                         amplitude_lag=None):
+                         amplitude_lag=None, add_dc_value=False, 
+                         nanonis_current_offset=0):
     """returns the phase- and amplitude corrected measurement data as 2d array
     
     This function parses the complex frequency values from the text file 
     data blocks and phase- and amplitude corrects them. Returns a 2d np.arrray 
+    
+    Function ammends the dset if the called _parse_all_data_blocks function
+    returns a dc_value with the parsed dset value. Therefore the returned
+    array length can vary by one depending if the parsed data has a dc_value
+    or not.
+    
     
     Parameter
     ---------
@@ -1180,6 +1276,12 @@ def get_measurement_data(block_list, prm, deviation=None, phase_lag=None,
         amplitude_lag | 1d np.array
             ampltiude lag values for every higher harmonic. Length has to match
             the FFT-coefficient length in ``dset_p``.
+        add_dc_value | bool
+            flag to indicate if dc_value is present and should be parsed
+        nanonis_current_offset | float
+            current offset value set within nanonis. is required for dc_value 
+            compensation
+
 
     Returns
     -------
@@ -1201,7 +1303,23 @@ def get_measurement_data(block_list, prm, deviation=None, phase_lag=None,
     
     
     """
-    dset = _parse_all_data_blocks(block_list, prm['demodnum'])
+    
+    # parse all data blocks
+    rtrn = _parse_all_data_blocks(block_list, prm['demodnum'])
+    
+    # case handling if dc_value is present
+    dc_value = None
+    if type(rtrn) != tuple:
+        dset = rtrn
+    else:
+        if len(rtrn) == 2:
+            dset, dc_value = rtrn
+        else:
+            raise MLAReconstructionException(
+                'Parse all data blocks failed. Invalid number of return args.'
+            )
+        
+    # apply signal corrections
     dset_rect = apply_amplitude_and_phase_correction(
         dset, 
         prm,
@@ -1209,7 +1327,42 @@ def get_measurement_data(block_list, prm, deviation=None, phase_lag=None,
         phase_lag=phase_lag,
         amplitude_lag=amplitude_lag
     )
+    
+    # add dc_value to corrected dset_rect
+    if add_dc_value and dc_value != None:
+        dset_rect = add_dc_value_to_fft_coeff_array(
+            dset, dc_value, nanonis_current_offset
+        )
     return dset_rect
+
+def add_dc_value_to_fft_coeff_array(dset, dc_value, nanonis_current_offset):
+    """returns the dset array with dc_value added as its first entry
+    
+    Parameter
+    ---------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).       
+        dc_value | float
+            dc_value for mla reconstruction
+        nanonis_current_offset | float
+            current offset value set within nanonis. is required for dc_value 
+            compensation
+
+        
+    Returns
+    -------
+        dset | 2d np.array
+            FFT coefficient matrix from a MLA measurement. Coefficient are 
+            stored complex values (i.e. cartesian representation).       
+    
+    """
+    shp = dset.shape[0], 1
+    dc_value_arr = np.ones(shp) * (dc_value - nanonis_current_offset)
+    return np.concatenate((dc_value_arr, dset), axis=1)
+     
+    
+    
     
 def apply_amplitude_and_phase_correction(dset, prm, deviation=None, phase_lag=None, 
                          amplitude_lag=None):
@@ -1585,7 +1738,6 @@ def _read_one_block(f, data_block_delimiter=None):
         if DC_VALUE_IDENTIFIER in s_:
             dc_value_line = s_
             f.readline()
-            print(dc_value_line)
         else:
             block_lines.append(s_)
         s_ = f.readline()
@@ -1601,6 +1753,7 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
                              pixel_number=None, zsweep_nr=40, missing_pxls=None,
                              deviation=None, phase_lag=None, amplitude_lag=None,
                              mode='a', e_res=0.005, mla_hdf5_fn=None, 
+                             add_dc_value=True, nanonis_current_offset=0,
                              verbose=True):
     """loads MLA raw data text file, computes the current and conductance maps, 
     and stores to a hdf5 file.
@@ -1651,6 +1804,11 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
             defines the filename of the generated HDF5 file. Default value is 
             the same name as the provided txt file with the file ending changed 
             to .hdf5
+        add_dc_value | bool
+            flag to indicate if dc_value is present and should be parsed
+        nanonis_current_offset | float
+            current offset value set within nanonis. is required for dc_value 
+            compensation
         verbose | bool
             specifies if conversion progress should be plotted to the console
     
@@ -1732,9 +1890,14 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
         os.remove(mla_hdf5_fn)
     f = h5py.File(mla_hdf5_fn, mode=mode)
     
+    if add_dc_value:
+        dset_len = prm['demodnum']
+    else:
+        dset_len = prm['demodnum']-1
+    
     dset = f.create_dataset(
         'dset', 
-        (prm['pixelNumber'], prm['demodnum']-1),
+        (prm['pixelNumber'], dset_len),
         dtype=np.complex128
     )
     curr = f.create_dataset(
@@ -1796,7 +1959,9 @@ def _load_mla_data_into_hdf5(mla_data_fn, resize_curr=False, resize_cond=False,
                 prm,
                 deviation=deviation,
                 phase_lag=phase_lag,
-                amplitude_lag=amplitude_lag
+                amplitude_lag=amplitude_lag,
+                add_dc_value=add_dc_value,
+                nanonis_current_offset=nanonis_current_offset
             )
             dset[idx] = arr_
         
@@ -2227,7 +2392,7 @@ if __name__ == "__main__":
     # lines = _load_mla_data(mla_data_fn)
     # block_list = _create_block_list(lines)
     # prm = _parse_mla_data_header(block_list)
-    # dset = _parse_all_data_blocks(block_list, prm['demodnum'])
+    # dset = _parse_all_data_blocks(block_list, prm['demodnum'])  # obsolete
     # dset_p = _convert_to_polar_coordinates(dset)
     # dset_p, deviation, phase_lag, amplitude_lag = _add_amplitude_and_phase_correction(dset_p)
     # dset_rect = _convert_to_rectangular_coordinates(dset_p)

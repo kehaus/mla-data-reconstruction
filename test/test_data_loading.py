@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Mar 25 23:47:56 2021
+Test cases for MLA reconstruction header and data loading
 
-@author: kh
+
+
 """
 
 import os

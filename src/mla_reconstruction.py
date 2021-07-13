@@ -1358,7 +1358,8 @@ def add_dc_value_to_fft_coeff_array(dset, dc_value, nanonis_current_offset):
     
     """
     shp = dset.shape[0], 1
-    dc_value_arr = np.ones(shp) * (dc_value - nanonis_current_offset)
+    print('                  dc-value: ', dc_value-nanonis_current_offset)
+    dc_value_arr = np.ones(shp) * (dc_value - nanonis_current_offset) 
     return np.concatenate((dc_value_arr, dset), axis=1)
      
     

@@ -133,3 +133,7 @@ dmypy.json
 # exclude reconstructed data
 # ================
 *.hdf5
+examples/test_data/20210611_DCoffset_testdata/Measurement of 2021-06-11 2011.txt
+examples/test_data/20210611_DCoffset_testdata/Measurement of 2021-06-11 2011_pixels-between.txt
+
+
